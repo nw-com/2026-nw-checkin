@@ -32,7 +32,7 @@
             </svg>
           </div>
           <div class="brand-text">
-            <div class="brand-title">西北打卡系統</div>
+            <div class="brand-title">西北打卡系統V1</div>
             <div class="brand-subtitle">請先登入以繼續</div>
           </div>
         </div>
@@ -45,6 +45,7 @@
           <div class="login-actions">
             <button id="emailSignIn" class="btn btn-primary" disabled>登入</button>
             <button id="initAdminBtn" class="btn">初始化管理員</button>
+            <button id="applyAccountBtn" class="btn">帳號申請</button>
           </div>
           <p class="muted" style="margin-top:8px;">
             預設管理員：<code>admin@nw-checkin.local</code> / <code>Admin2026!</code>（登入後請至 Firebase 重設密碼）
@@ -64,7 +65,7 @@
               <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
-          <span class="system-name">西北打卡系統</span>
+          <span class="system-name">西北打卡系統V1</span>
         </div>
         <div class="header-right">
           <span id="userName" class="user-name">未登入</span>
@@ -103,10 +104,7 @@
           <div class="panel">
             <h3>設定</h3>
             <p id="settingsSubTitle" class="muted"></p>
-            <ul>
-              <li>於 Firestore 的 <code>users/{uid}</code> 設定 <code>role</code> 權限。</li>
-              <li>角色階層：系統管理員、管理層、高階主管、初階主管、行政、一般、勤務。</li>
-            </ul>
+            <div id="settingsContent"></div>
           </div>
         </section>
 
@@ -162,40 +160,51 @@
         </button>
         <button class="tab-btn" data-tab="leader" aria-label="幹部">
           <div class="tab-icon" aria-hidden="true">
-            <!-- Map pin -->
+            <!-- Users -->
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 21s7-7 7-11a7 7 0 10-14 0c0 4 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              <circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="2" />
+              <circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="2" />
+              <circle cx="16" cy="10" r="2.5" stroke="currentColor" stroke-width="2" />
+              <path d="M4 20c0-3 3-5 6-5s6 2 6 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
           <div class="tab-label">幹部</div>
         </button>
         <button class="tab-btn" data-tab="manage" aria-label="管理">
           <div class="tab-icon" aria-hidden="true">
-            <!-- Dashboard -->
+            <!-- Shield -->
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect x="3" y="3" width="8" height="7" rx="1.5" stroke="currentColor" stroke-width="2" />
-              <rect x="13" y="3" width="8" height="11" rx="1.5" stroke="currentColor" stroke-width="2" />
-              <rect x="3" y="12" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="2" />
+              <path d="M12 3l7 4v5c0 5-7 9-7 9s-7-4-7-9V7l7-4z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
           <div class="tab-label">管理</div>
         </button>
         <button class="tab-btn" data-tab="feature" aria-label="功能">
           <div class="tab-icon" aria-hidden="true">
-            <!-- Tools -->
+            <!-- Apps Grid -->
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M7 7l10 10M14 4l6 6M4 14l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <rect x="4" y="4" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="10" y="4" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="16" y="4" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="4" y="10" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="10" y="10" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="16" y="10" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="4" y="16" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="10" y="16" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
+              <rect x="16" y="16" width="3" height="3" rx="0.75" stroke="currentColor" stroke-width="2" />
             </svg>
           </div>
           <div class="tab-label">功能</div>
         </button>
         <button class="tab-btn" data-tab="settings" aria-label="設定">
           <div class="tab-icon" aria-hidden="true">
-            <!-- Gear (簡化) -->
+            <!-- Sliders -->
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" />
-              <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <line x1="4" y1="7" x2="20" y2="7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <circle cx="9" cy="7" r="2" stroke="currentColor" stroke-width="2" />
+              <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <circle cx="15" cy="12" r="2" stroke="currentColor" stroke-width="2" />
+              <line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              <circle cx="12" cy="17" r="2" stroke="currentColor" stroke-width="2" />
             </svg>
           </div>
           <div class="tab-label">設定</div>
@@ -203,6 +212,7 @@
       </footer>
     </div>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=3"></script>
+    <div id="modalRoot" class="modal-root hidden"></div>
   </body>
   </html>

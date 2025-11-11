@@ -76,7 +76,7 @@ body {
 /* 子分頁（頁中上） */
 .subheader-tabs { display: flex; align-items: center; gap: 8px; overflow-x: auto; }
 .subtab-btn { background: transparent; border: none; color: #374151; font-size: 14px; padding: 6px 10px; border-radius: 999px; }
-.subtab-btn.active { color: #FF6670; background: #ffe5e7; }
+.subtab-btn.active { color: #FF6670; }
 /* 子分頁游標與 hover/active/pressed 效果 */
 button, .tab-btn, .subtab-btn { cursor: pointer; }
 button[disabled] { cursor: not-allowed; }
@@ -95,6 +95,31 @@ button[disabled] { cursor: not-allowed; }
   box-shadow: 0 6px 16px rgba(0,0,0,0.06);
 }
 .panel h3 { margin: 0 0 8px 0; font-size: 16px; }
+
+/* 設定分頁內表格與列表樣式 */
+.block { margin-top: 12px; }
+.block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.block-title { font-weight: 600; font-size: 15px; }
+.block-actions { display: flex; gap: 8px; }
+
+.table { width: 100%; border-collapse: collapse; }
+.table thead th { text-align: left; font-size: 13px; color: #6b7280; border-bottom: 1px solid #e5e7eb; padding: 8px; white-space: nowrap; }
+.table tbody td { border-bottom: 1px solid #f3f4f6; padding: 8px; font-size: 14px; vertical-align: top; }
+.table .cell-actions { white-space: nowrap; }
+.table-wrapper { width: 100%; overflow-x: auto; }
+
+/* 通用彈窗 */
+.modal-root { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(17, 24, 39, 0.35); z-index: 3000; padding: 16px; }
+.modal-root:not(.hidden) { display: flex; }
+.modal { width: 100%; max-width: 640px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.2); }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+.modal-title { font-size: 16px; font-weight: 700; }
+.modal-body { padding: 12px 16px; display: grid; gap: 10px; }
+.modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid #e5e7eb; }
+.form-row { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center; }
+.form-row .label { margin: 0; }
+.form-row .input { width: 100%; }
+.help { font-size: 12px; color: #6b7280; }
 
 .app-footer {
   position: fixed; bottom: 0; left: 0; right: 0; height: 8vh; min-height: 48px; display: flex; align-items: center; justify-content: space-around;
