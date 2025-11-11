@@ -119,6 +119,7 @@ const appState = {
   licenses: [],
   communities: [],
   accounts: [],
+  pendingAccounts: [],
 };
 
 function id() {
@@ -296,7 +297,7 @@ if (applyAccountBtn) {
         { key: "licenses", label: "相關證照", type: "multiselect", options: optionList(appState.licenses) },
       ],
       onSubmit: (d) => {
-        appState.accounts.push({ id: id(), ...d, role: "一般", status: "在職", companyId: null, serviceCommunities: [] });
+        appState.pendingAccounts.push({ id: id(), ...d, role: "一般", status: "待審核", companyId: null, serviceCommunities: [], createdAt: new Date().toISOString() });
       },
     });
   });
@@ -566,6 +567,19 @@ function renderSettingsAccounts() {
     </tr>`;
   }).join("");
 
+  const pendingRows = appState.pendingAccounts.map((p) => {
+    return `<tr data-id="${p.id}">
+      <td>${p.photoUrl ? `<img src="${p.photoUrl}" alt="頭像" style="width:36px;height:36px;border-radius:50%;object-fit:cover;"/>` : ""}</td>
+      <td>${p.name || ""}</td>
+      <td>${p.title || ""}</td>
+      <td>${p.email || ""}</td>
+      <td>${p.phone || ""}</td>
+      <td>${p.role || "一般"}</td>
+      <td>${p.status || "待審核"}</td>
+      <td class="cell-actions"><button class="btn" data-act="approve">核准</button><button class="btn" data-act="del">刪除</button></td>
+    </tr>`;
+  }).join("");
+
   settingsContent.innerHTML = `
     <div class="block" id="block-accounts">
       <div class="block-header"><span class="block-title">帳號列表</span><div class="block-actions"><button id="btnAddAccount" class="btn">新增</button></div></div>
@@ -577,6 +591,20 @@ function renderSettingsAccounts() {
             </tr>
           </thead>
           <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="block" id="block-pending-accounts">
+      <div class="block-header"><span class="block-title">待審核帳號</span></div>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>大頭照</th><th>中文姓名</th><th>職稱</th><th>電子郵件</th><th>手機號碼</th><th>角色</th><th>狀況</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>${pendingRows}</tbody>
         </table>
       </div>
     </div>`;
@@ -643,6 +671,26 @@ function renderSettingsAccounts() {
         });
       } else if (act === "del") {
         appState.accounts = appState.accounts.filter((x) => x.id !== aid);
+        renderSettingsContent("帳號");
+      }
+    });
+  });
+
+  // 待審核帳號事件綁定
+  settingsContent.querySelectorAll("#block-pending-accounts tbody tr").forEach((tr) => {
+    const pid = tr.dataset.id;
+    tr.querySelectorAll("button").forEach((b) => attachPressInteractions(b));
+    tr.addEventListener("click", (e) => {
+      const act = e.target?.dataset?.act;
+      const item = appState.pendingAccounts.find((x) => x.id === pid);
+      if (!act || !item) return;
+      if (act === "approve") {
+        const approved = { ...item, status: "在職" };
+        appState.accounts.push(approved);
+        appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
+        renderSettingsContent("帳號");
+      } else if (act === "del") {
+        appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
         renderSettingsContent("帳號");
       }
     });

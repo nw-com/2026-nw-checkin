@@ -6,7 +6,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   color: #111827;
   /* 依照圖片，整頁紅色背景 */
-  background: #D72631;
+  background: #FF6670;
 }
 
 /* 設定提示 */
@@ -22,13 +22,15 @@ body {
 .setup-card code { background: #f3f4f6; padding: 2px 6px; border-radius: 6px; }
 
 /* 登入頁 */
-.login-view { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login-view { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #FF6670; }
 .login-card {
   width: 100%; max-width: 560px; background: #ffffff; border-radius: 20px; border: 1px solid #e5e7eb;
   box-shadow: 0 12px 32px rgba(0,0,0,0.10);
   padding: 28px;
 }
 .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.brand { justify-content: center; }
+.brand-text { text-align: center; }
 .brand-icon { width: 40px; height: 40px; display: grid; place-items: center; color: #FF6670; }
 .brand-title { font-size: 20px; font-weight: 700; }
 .brand-subtitle { font-size: 13px; color: #6b7280; }
@@ -53,7 +55,9 @@ body {
 }
 .input:focus { outline: 2px solid #FF6670; border-color: #FF6670; }
 .login-actions { display: flex; gap: 8px; margin-top: 6px; }
-.login-secondary { display: flex; gap: 8px; margin-top: 10px; }
+.login-actions .btn { width: 100%; }
+.login-secondary { display: flex; gap: 8px; margin-top: 10px; flex-direction: column; }
+.login-secondary .btn { width: 100%; }
 .btn-ghost { background: transparent; color: #374151; border: 1px solid transparent; }
 .btn-ghost:hover { background: #f3f4f6; }
 .input-wrap { position: relative; }
@@ -105,9 +109,12 @@ button[disabled] { cursor: not-allowed; }
   box-shadow: 0 6px 16px rgba(0,0,0,0.06);
 }
 .panel h3 { margin: 0 0 8px 0; font-size: 16px; }
+/* 縮小頁中（app-main）內的按鈕尺寸 */
+.app-main .btn { padding: 8px 12px; font-size: 14px; border-radius: 8px; }
+.btn-sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
 
 /* 設定分頁內表格與列表樣式 */
-.block { margin-top: 12px; }
+.block { margin-top: 16px; }
 .block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .block-title { font-weight: 600; font-size: 15px; }
 .block-actions { display: flex; gap: 8px; }
@@ -121,10 +128,29 @@ button[disabled] { cursor: not-allowed; }
 /* 通用彈窗 */
 .modal-root { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(17, 24, 39, 0.35); z-index: 3000; padding: 16px; }
 .modal-root:not(.hidden) { display: flex; }
-.modal { width: 100%; max-width: 640px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.2); }
+.modal {
+  width: 100%;
+  max-width: 640px;
+  /* 不超過視窗尺寸，保留邊距 */
+  max-height: calc(100vh - 48px);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+  /* 內容溢出時，改由內部垂直捲動 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
 .modal-title { font-size: 16px; font-weight: 700; }
-.modal-body { padding: 12px 16px; display: grid; gap: 10px; }
+.modal-body {
+  padding: 12px 16px;
+  display: grid;
+  gap: 10px;
+  /* 讓內容區自己捲動，不撐爆視窗 */
+  overflow-y: auto;
+}
 .modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid #e5e7eb; }
 .form-row { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center; }
 .form-row .label { margin: 0; }
