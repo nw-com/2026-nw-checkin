@@ -71,6 +71,17 @@ if (!isConfigReady()) {
 
 // ===== 4) 動態載入 Firebase 模組並初始化 =====
 let firebaseApp, auth, db;
+// 將常用 Firebase 函式存到外層，讓按鈕事件可即時呼叫
+let fns = {
+  signInWithEmailAndPassword: null,
+  createUserWithEmailAndPassword: null,
+  doc: null,
+  getDoc: null,
+  setDoc: null,
+  addDoc: null,
+  collection: null,
+  serverTimestamp: null,
+};
 
 async function ensureFirebase() {
   if (!isConfigReady()) return;
@@ -86,35 +97,15 @@ async function ensureFirebase() {
   auth = getAuth(firebaseApp);
   db = getFirestore(firebaseApp);
 
-  // 綁定 Email/密碼登入
-  emailSignInBtn.addEventListener("click", async () => {
-    const email = emailInput.value.trim();
-    const password = passwordInput.value;
-    if (!email || !password) {
-      alert("請輸入電子郵件與密碼");
-      return;
-    }
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (err) {
-      alert(`登入失敗：${err?.message || err}`);
-    }
-  });
-
-  // 初始化管理員（建立帳號 + 設定 role = 系統管理員）
-  initAdminBtn.addEventListener("click", async () => {
-    const email = emailInput.value.trim() || "admin@nw-checkin.local";
-    const password = passwordInput.value || "Admin2026!";
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      const user = cred.user;
-      const userDocRef = doc(db, "users", user.uid);
-      await setDoc(userDocRef, { role: "系統管理員", name: user.email || "管理員", createdAt: serverTimestamp() });
-      alert("管理員初始化完成，已自動登入。");
-    } catch (err) {
-      alert(`初始化失敗：${err?.message || err}`);
-    }
-  });
+  // 將函式指派到外層供事件使用
+  fns.signInWithEmailAndPassword = signInWithEmailAndPassword;
+  fns.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+  fns.doc = doc;
+  fns.getDoc = getDoc;
+  fns.setDoc = setDoc;
+  fns.addDoc = addDoc;
+  fns.collection = collection;
+  fns.serverTimestamp = serverTimestamp;
 
   // 監聽登入狀態
   onAuthStateChanged(auth, async (user) => {
@@ -224,7 +215,50 @@ async function ensureFirebase() {
   }
 }
 
-// 啟動
+// ===== 5) 事件綁定（即使首次載入尚未初始化，也能觸發） =====
+emailSignInBtn?.addEventListener("click", async () => {
+  const email = emailInput.value.trim();
+  const password = passwordInput.value;
+  if (!email || !password) {
+    alert("請輸入電子郵件與密碼");
+    return;
+  }
+  if (!isConfigReady()) {
+    alert("尚未設定 Firebase 金鑰，請於 app.js 補齊。");
+    return;
+  }
+  if (!auth || !fns.signInWithEmailAndPassword) {
+    await ensureFirebase();
+  }
+  try {
+    await fns.signInWithEmailAndPassword(auth, email, password);
+  } catch (err) {
+    alert(`登入失敗：${err?.message || err}`);
+  }
+});
+
+initAdminBtn?.addEventListener("click", async () => {
+  const email = emailInput.value.trim() || "admin@nw-checkin.local";
+  const password = passwordInput.value || "Admin2026!";
+  if (!isConfigReady()) {
+    alert("尚未設定 Firebase 金鑰，請於 app.js 補齊。");
+    return;
+  }
+  if (!auth || !fns.createUserWithEmailAndPassword) {
+    await ensureFirebase();
+  }
+  try {
+    const cred = await fns.createUserWithEmailAndPassword(auth, email, password);
+    const user = cred.user;
+    const userDocRef = fns.doc(db, "users", user.uid);
+    await fns.setDoc(userDocRef, { role: "系統管理員", name: user.email || "管理員", createdAt: fns.serverTimestamp() });
+    alert("管理員初始化完成，已自動登入。");
+  } catch (err) {
+    alert(`初始化失敗：${err?.message || err}`);
+  }
+});
+
+// 啟動：若設定已就緒，先行初始化以載入使用者狀態
 (async () => {
   if (isConfigReady()) {
     await ensureFirebase();
