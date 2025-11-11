@@ -74,7 +74,7 @@
 
       <!-- 頁中上：10% 高，固定於頁首下方、最上層 -->
       <div class="app-subheader">
-        <div id="subHeaderText" class="subheader-text">歡迎使用</div>
+        <div id="subTabs" class="subheader-tabs"></div>
       </div>
 
       <!-- 頁中：70% 高 -->
@@ -91,6 +91,7 @@
         <section id="checkinSection" class="section hidden">
           <div class="panel">
             <h3>打卡</h3>
+            <p id="checkinSubTitle" class="muted"></p>
             <p id="locationInfo" class="muted">定位中…</p>
             <button id="checkinBtn" class="btn btn-primary">打卡</button>
             <p id="checkinResult" class="muted"></p>
@@ -101,10 +102,38 @@
         <section id="settingsSection" class="section hidden">
           <div class="panel">
             <h3>設定</h3>
+            <p id="settingsSubTitle" class="muted"></p>
             <ul>
               <li>於 Firestore 的 <code>users/{uid}</code> 設定 <code>role</code> 權限。</li>
               <li>角色階層：系統管理員、管理層、高階主管、初階主管、行政、一般、勤務。</li>
             </ul>
+          </div>
+        </section>
+
+        <!-- 幹部分頁 -->
+        <section id="leaderSection" class="section hidden">
+          <div class="panel">
+            <h3>幹部</h3>
+            <p id="leaderSubTitle" class="muted"></p>
+            <p class="muted">此分頁的功能將在後續實作。</p>
+          </div>
+        </section>
+
+        <!-- 管理分頁 -->
+        <section id="manageSection" class="section hidden">
+          <div class="panel">
+            <h3>管理</h3>
+            <p id="manageSubTitle" class="muted"></p>
+            <p class="muted">此分頁的功能將在後續實作。</p>
+          </div>
+        </section>
+
+        <!-- 功能分頁 -->
+        <section id="featureSection" class="section hidden">
+          <div class="panel">
+            <h3>功能</h3>
+            <p id="featureSubTitle" class="muted"></p>
+            <p class="muted">此分頁的功能將在後續實作。</p>
           </div>
         </section>
       </main>
@@ -130,6 +159,36 @@
             </svg>
           </div>
           <div class="tab-label">打卡</div>
+        </button>
+        <button class="tab-btn" data-tab="leader" aria-label="幹部">
+          <div class="tab-icon" aria-hidden="true">
+            <!-- Map pin -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 21s7-7 7-11a7 7 0 10-14 0c0 4 7 11 7 11z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </div>
+          <div class="tab-label">幹部</div>
+        </button>
+        <button class="tab-btn" data-tab="manage" aria-label="管理">
+          <div class="tab-icon" aria-hidden="true">
+            <!-- Dashboard -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="3" y="3" width="8" height="7" rx="1.5" stroke="currentColor" stroke-width="2" />
+              <rect x="13" y="3" width="8" height="11" rx="1.5" stroke="currentColor" stroke-width="2" />
+              <rect x="3" y="12" width="8" height="9" rx="1.5" stroke="currentColor" stroke-width="2" />
+            </svg>
+          </div>
+          <div class="tab-label">管理</div>
+        </button>
+        <button class="tab-btn" data-tab="feature" aria-label="功能">
+          <div class="tab-icon" aria-hidden="true">
+            <!-- Tools -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M7 7l10 10M14 4l6 6M4 14l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="tab-label">功能</div>
         </button>
         <button class="tab-btn" data-tab="settings" aria-label="設定">
           <div class="tab-icon" aria-hidden="true">

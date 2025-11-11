@@ -38,16 +38,24 @@ const initAdminBtn = document.getElementById("initAdminBtn");
 
 const userNameEl = document.getElementById("userName");
 const userPhotoEl = document.getElementById("userPhoto");
-const subHeaderText = document.getElementById("subHeaderText");
+const subTabsEl = document.getElementById("subTabs");
 
 const homeSection = document.getElementById("homeSection");
 const checkinSection = document.getElementById("checkinSection");
 const settingsSection = document.getElementById("settingsSection");
+const leaderSection = document.getElementById("leaderSection");
+const manageSection = document.getElementById("manageSection");
+const featureSection = document.getElementById("featureSection");
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
 
 const locationInfo = document.getElementById("locationInfo");
 const checkinBtn = document.getElementById("checkinBtn");
 const checkinResult = document.getElementById("checkinResult");
+const checkinSubTitle = document.getElementById("checkinSubTitle");
+const settingsSubTitle = document.getElementById("settingsSubTitle");
+const leaderSubTitle = document.getElementById("leaderSubTitle");
+const manageSubTitle = document.getElementById("manageSubTitle");
+const featureSubTitle = document.getElementById("featureSubTitle");
 
 // ===== 3) 檢查是否已設定 API 金鑰 =====
 function isConfigReady() {
@@ -132,7 +140,7 @@ async function ensureFirebase() {
       } else {
         await setDoc(userDocRef, { role, name: user.displayName || "使用者", createdAt: serverTimestamp() });
       }
-      subHeaderText.textContent = `身份：${role}`;
+      // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
       // 啟用定位顯示
       initGeolocation();
@@ -154,10 +162,50 @@ async function ensureFirebase() {
   });
 
   function setActiveTab(tab) {
+    activeMainTab = tab;
     tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
     homeSection.classList.toggle("hidden", tab !== "home");
     checkinSection.classList.toggle("hidden", tab !== "checkin");
+    leaderSection.classList.toggle("hidden", tab !== "leader");
+    manageSection.classList.toggle("hidden", tab !== "manage");
+    featureSection.classList.toggle("hidden", tab !== "feature");
     settingsSection.classList.toggle("hidden", tab !== "settings");
+    renderSubTabs(tab);
+  }
+
+  function renderSubTabs(mainTab) {
+    const tabs = SUB_TABS[mainTab] || [];
+    subTabsEl.innerHTML = "";
+    if (!tabs.length) return;
+    tabs.forEach((label, idx) => {
+      const btn = document.createElement("button");
+      btn.className = "subtab-btn";
+      btn.textContent = label;
+      btn.dataset.subtab = label;
+      btn.addEventListener("click", () => setActiveSubTab(label));
+      subTabsEl.appendChild(btn);
+      if (idx === 0) activeSubTab = label;
+    });
+    setActiveSubTab(activeSubTab);
+  }
+
+  function setActiveSubTab(label) {
+    activeSubTab = label;
+    Array.from(subTabsEl.querySelectorAll(".subtab-btn")).forEach((b) => {
+      b.classList.toggle("active", b.dataset.subtab === label);
+    });
+    // 更新各分頁的子分頁標題（作占位）
+    if (activeMainTab === "checkin") {
+      checkinSubTitle.textContent = `子分頁：${label}`;
+    } else if (activeMainTab === "leader") {
+      leaderSubTitle.textContent = `子分頁：${label}`;
+    } else if (activeMainTab === "manage") {
+      manageSubTitle.textContent = `子分頁：${label}`;
+    } else if (activeMainTab === "feature") {
+      featureSubTitle.textContent = `子分頁：${label}`;
+    } else if (activeMainTab === "settings") {
+      settingsSubTitle.textContent = `子分頁：${label}`;
+    }
   }
 
   // 初始分頁
@@ -264,3 +312,15 @@ initAdminBtn?.addEventListener("click", async () => {
     await ensureFirebase();
   }
 })();
+// 子分頁定義（頁中上）
+const SUB_TABS = {
+  home: [],
+  checkin: ["紀錄", "請假", "計點"],
+  leader: ["地圖", "紀錄", "請假", "計點"],
+  manage: ["總覽", "地圖", "記錄", "請假", "計點"],
+  feature: ["公告", "文件", "工具"],
+  settings: ["一般", "帳號", "社區", "規則", "系統"],
+};
+
+let activeMainTab = "home";
+let activeSubTab = null;

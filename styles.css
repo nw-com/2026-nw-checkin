@@ -70,6 +70,11 @@ body {
 }
 .subheader-text { font-size: 14px; color: #111827; }
 
+/* 子分頁（頁中上） */
+.subheader-tabs { display: flex; align-items: center; gap: 8px; overflow-x: auto; }
+.subtab-btn { background: transparent; border: none; color: #374151; font-size: 14px; padding: 6px 10px; border-radius: 999px; }
+.subtab-btn.active { color: #FF6670; background: #ffe5e7; }
+
 .app-main {
   /* 78% 高度視覺區域，避開上方 14vh（8+6）固定列與下方 8vh 頁尾 */
   padding-top: calc(8vh + 6vh + 12px);
