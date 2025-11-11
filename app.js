@@ -37,6 +37,8 @@ const passwordInput = document.getElementById("passwordInput");
 const emailSignInBtn = document.getElementById("emailSignIn");
 const initAdminBtn = document.getElementById("initAdminBtn");
 const applyAccountBtn = document.getElementById("applyAccountBtn");
+const togglePasswordBtn = document.getElementById("togglePassword");
+const togglePasswordIcon = document.getElementById("togglePasswordIcon");
 
 const userNameEl = document.getElementById("userName");
 const userPhotoEl = document.getElementById("userPhoto");
@@ -86,6 +88,22 @@ attachPressInteractions(document.getElementById("checkinBtn"));
 attachPressInteractions(document.getElementById("emailSignIn"));
 attachPressInteractions(document.getElementById("initAdminBtn"));
 attachPressInteractions(document.getElementById("applyAccountBtn"));
+attachPressInteractions(togglePasswordBtn);
+
+// 顯示/隱藏密碼
+if (togglePasswordBtn) {
+  togglePasswordBtn.addEventListener("click", () => {
+    if (!passwordInput) return;
+    const show = passwordInput.type === "password";
+    passwordInput.type = show ? "text" : "password";
+    // 切換圖示（簡化：加/去斜線）
+    if (togglePasswordIcon) {
+      togglePasswordIcon.innerHTML = show
+        ? '<path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/>'
+        : '<path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/><line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2"/>';
+    }
+  });
+}
 
 // ===== 2.2) 設定分頁資料狀態與彈窗工具 =====
 const appState = {

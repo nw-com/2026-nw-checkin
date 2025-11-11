@@ -5,7 +5,8 @@ body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   color: #111827;
-  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #e0e7ff 100%);
+  /* 依照圖片，整頁紅色背景 */
+  background: #D72631;
 }
 
 /* 設定提示 */
@@ -43,6 +44,8 @@ body {
 
 /* 表單樣式 */
 .login-form { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.form-head { display: flex; align-items: center; justify-content: space-between; }
+.remember { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #374151; }
 .label { font-size: 13px; color: #374151; }
 .input {
   width: 100%; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px;
@@ -50,6 +53,13 @@ body {
 }
 .input:focus { outline: 2px solid #FF6670; border-color: #FF6670; }
 .login-actions { display: flex; gap: 8px; margin-top: 6px; }
+.login-secondary { display: flex; gap: 8px; margin-top: 10px; }
+.btn-ghost { background: transparent; color: #374151; border: 1px solid transparent; }
+.btn-ghost:hover { background: #f3f4f6; }
+.input-wrap { position: relative; }
+.icon-btn { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; padding: 4px; color: #6b7280; cursor: pointer; border-radius: 6px; }
+.icon-btn:hover { background: #f3f4f6; }
+.icon-btn:active, .icon-btn.pressed { background: #e5e7eb; }
 
 /* 主頁固定版面（10/10/70/10） */
 .app-view { min-height: 100vh; }
