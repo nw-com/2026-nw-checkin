@@ -1,0 +1,86 @@
+/* 基本重置與字體 */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  color: #111827;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #e0e7ff 100%);
+}
+
+/* 設定提示 */
+.setup-warning { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 2000; }
+.setup-warning.hidden { display: none; }
+.setup-card {
+  max-width: 720px; width: 100%; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  padding: 24px;
+}
+.setup-card h2 { margin: 0 0 8px; font-size: 20px; }
+.setup-card p { margin: 0; line-height: 1.6; color: #374151; }
+.setup-card code { background: #f3f4f6; padding: 2px 6px; border-radius: 6px; }
+
+/* 登入頁 */
+.login-view { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login-card {
+  width: 100%; max-width: 560px; background: #ffffff; border-radius: 20px; border: 1px solid #e5e7eb;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.10);
+  padding: 28px;
+}
+.brand { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.brand-icon { width: 40px; height: 40px; display: grid; place-items: center; }
+.brand-title { font-size: 20px; font-weight: 700; }
+.brand-subtitle { font-size: 13px; color: #6b7280; }
+.btn { appearance: none; border: none; background: #111827; color: #ffffff; padding: 12px 16px; border-radius: 10px; font-size: 15px; cursor: pointer; }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-google { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; background: #ffffff; color: #111827; border: 1px solid #e5e7eb; }
+.btn-primary { background: #2563eb; }
+.muted { color: #6b7280; }
+.google-icon { width: 18px; height: 18px; }
+
+/* 主頁固定版面（10/10/70/10） */
+.app-view { min-height: 100vh; }
+.hidden { display: none; }
+
+.app-header {
+  position: fixed; top: 0; left: 0; right: 0; height: 10vh; min-height: 56px;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 14px;
+  background: #ffffff; border-bottom: 1px solid #e5e7eb; z-index: 1000;
+}
+.header-left { display: flex; align-items: center; gap: 10px; }
+.header-icon { width: 28px; height: 28px; display: grid; place-items: center; }
+.system-name { font-weight: 700; font-size: 16px; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+.user-name { font-size: 14px; color: #374151; }
+.user-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #e5e7eb; }
+
+.app-subheader {
+  position: fixed; top: 10vh; left: 0; right: 0; height: 10vh; min-height: 52px;
+  display: flex; align-items: center; padding: 0 14px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; z-index: 900;
+}
+.subheader-text { font-size: 14px; color: #111827; }
+
+.app-main {
+  /* 70% 高度的視覺區域，避開上方 20vh 固定列與下方 10vh 頁尾 */
+  padding-top: calc(10vh + 10vh + 12px);
+  padding-bottom: calc(10vh + 12px);
+}
+.section { padding: 12px; }
+.panel {
+  background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+}
+.panel h3 { margin: 0 0 8px 0; font-size: 16px; }
+
+.app-footer {
+  position: fixed; bottom: 0; left: 0; right: 0; height: 10vh; min-height: 56px; display: flex; align-items: center; justify-content: space-around;
+  background: #ffffff; border-top: 1px solid #e5e7eb; z-index: 1000;
+}
+.tab-btn { background: transparent; border: none; font-size: 15px; color: #374151; padding: 10px 16px; border-radius: 8px; }
+.tab-btn.active { color: #2563eb; font-weight: 600; }
+
+/* 小型裝置優化 */
+@media (max-width: 480px) {
+  .brand-title { font-size: 18px; }
+  .system-name { font-size: 15px; }
+}

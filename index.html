@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>西北打卡系統</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- 設定提示（未填 Firebase / Maps 金鑰時顯示）-->
+    <div id="setup-warning" class="setup-warning hidden">
+      <div class="setup-card">
+        <h2>請完成最後的設定步驟</h2>
+        <p>
+          系統偵測到您尚未設定 Firebase 或 Google Maps 的 API 金鑰。<br />
+          這不是程式錯誤，而是必要的設定。基於安全考量，我無法為您產生金鑰，您必須親自完成此設定。<br />
+          請打開 <code>app.js</code> 檔案，找到 <code>FIREBASE_CONFIG</code>，並依照註解指示填入金鑰。<br />
+          詳細步驟請參考 <code>README.md</code> 檔案。
+        </p>
+      </div>
+    </div>
+
+    <!-- 登入頁（參照原站設計） -->
+    <div id="login-view" class="login-view">
+      <div class="login-card">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true">
+            <!-- 打卡系統圖形：簡化 SVG -->
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="10" stroke="#2563eb" stroke-width="2" />
+              <path d="M12 6v6l4 2" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div class="brand-text">
+            <div class="brand-title">西北勤務打卡系統</div>
+            <div class="brand-subtitle">請先登入以繼續</div>
+          </div>
+        </div>
+
+        <button id="googleSignIn" class="btn btn-google" disabled>
+          <img class="google-icon" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
+          使用 Google 登入
+        </button>
+      </div>
+    </div>
+
+    <!-- 主頁（登入後顯示） -->
+    <div id="app-view" class="app-view hidden">
+      <!-- 頁首：10% 高，固定頂部、最上層 -->
+      <header class="app-header">
+        <div class="header-left">
+          <div class="header-icon" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="10" stroke="#1f2937" stroke-width="2" />
+              <path d="M12 6v6l4 2" stroke="#1f2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <span class="system-name">西北打卡系統</span>
+        </div>
+        <div class="header-right">
+          <span id="userName" class="user-name">未登入</span>
+          <img id="userPhoto" class="user-photo" alt="使用者照片" />
+        </div>
+      </header>
+
+      <!-- 頁中上：10% 高，固定於頁首下方、最上層 -->
+      <div class="app-subheader">
+        <div id="subHeaderText" class="subheader-text">歡迎使用</div>
+      </div>
+
+      <!-- 頁中：70% 高 -->
+      <main class="app-main">
+        <!-- 首頁分頁 -->
+        <section id="homeSection" class="section">
+          <div class="panel">
+            <h3>首頁</h3>
+            <p>這裡顯示統計、公告或快捷功能。</p>
+          </div>
+        </section>
+
+        <!-- 打卡分頁 -->
+        <section id="checkinSection" class="section hidden">
+          <div class="panel">
+            <h3>打卡</h3>
+            <p id="locationInfo" class="muted">定位中…</p>
+            <button id="checkinBtn" class="btn btn-primary">打卡</button>
+            <p id="checkinResult" class="muted"></p>
+          </div>
+        </section>
+
+        <!-- 設定分頁 -->
+        <section id="settingsSection" class="section hidden">
+          <div class="panel">
+            <h3>設定</h3>
+            <ul>
+              <li>於 Firestore 的 <code>users/{uid}</code> 設定 <code>role</code> 權限。</li>
+              <li>角色階層：系統管理員、管理層、高階主管、初階主管、行政、一般、勤務。</li>
+            </ul>
+          </div>
+        </section>
+      </main>
+
+      <!-- 頁尾：10% 高，固定底部、最上層 -->
+      <footer class="app-footer">
+        <button class="tab-btn active" data-tab="home">首頁</button>
+        <button class="tab-btn" data-tab="checkin">打卡</button>
+        <button class="tab-btn" data-tab="settings">設定</button>
+      </footer>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+  </html>
