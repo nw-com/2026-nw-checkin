@@ -28,13 +28,13 @@ body {
   padding: 28px;
 }
 .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
-.brand-icon { width: 40px; height: 40px; display: grid; place-items: center; }
+.brand-icon { width: 40px; height: 40px; display: grid; place-items: center; color: #FF6670; }
 .brand-title { font-size: 20px; font-weight: 700; }
 .brand-subtitle { font-size: 13px; color: #6b7280; }
 .btn { appearance: none; border: none; background: #111827; color: #ffffff; padding: 12px 16px; border-radius: 10px; font-size: 15px; cursor: pointer; }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .btn-google { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; background: #ffffff; color: #111827; border: 1px solid #e5e7eb; }
-.btn-primary { background: #2563eb; }
+.btn-primary { background: #FF6670; }
 .muted { color: #6b7280; }
 .google-icon { width: 18px; height: 18px; }
 
@@ -45,7 +45,7 @@ body {
   width: 100%; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px;
   padding: 10px 12px; font-size: 14px; color: #111827;
 }
-.input:focus { outline: 2px solid #93c5fd; border-color: #93c5fd; }
+.input:focus { outline: 2px solid #FF6670; border-color: #FF6670; }
 .login-actions { display: flex; gap: 8px; margin-top: 6px; }
 
 /* 主頁固定版面（10/10/70/10） */
@@ -53,27 +53,28 @@ body {
 .hidden { display: none; }
 
 .app-header {
-  position: fixed; top: 0; left: 0; right: 0; height: 10vh; min-height: 56px;
+  position: fixed; top: 0; left: 0; right: 0; height: 8vh; min-height: 48px;
   display: flex; align-items: center; justify-content: space-between; padding: 0 14px;
-  background: #ffffff; border-bottom: 1px solid #e5e7eb; z-index: 1000;
+  background: #FF6670; color: #FFFFFF; border-bottom: none; z-index: 1000;
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .header-icon { width: 28px; height: 28px; display: grid; place-items: center; }
-.system-name { font-weight: 700; font-size: 16px; }
-.header-right { display: flex; align-items: center; gap: 10px; }
-.user-name { font-size: 14px; color: #374151; }
+.system-name { font-weight: 700; font-size: 16px; color: inherit; }
+.header-right { display: flex; align-items: center; gap: 10px; color: inherit; }
+.user-name { font-size: 14px; color: inherit; }
 .user-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #e5e7eb; }
 
 .app-subheader {
-  position: fixed; top: 10vh; left: 0; right: 0; height: 10vh; min-height: 52px;
+  position: fixed; top: 8vh; left: 0; right: 0; height: 6vh; min-height: 44px;
   display: flex; align-items: center; padding: 0 14px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; z-index: 900;
 }
 .subheader-text { font-size: 14px; color: #111827; }
 
 .app-main {
-  /* 70% 高度的視覺區域，避開上方 20vh 固定列與下方 10vh 頁尾 */
-  padding-top: calc(10vh + 10vh + 12px);
-  padding-bottom: calc(10vh + 12px);
+  /* 78% 高度視覺區域，避開上方 14vh（8+6）固定列與下方 8vh 頁尾 */
+  padding-top: calc(8vh + 6vh + 12px);
+  padding-bottom: calc(8vh + 12px);
+  min-height: 78vh;
 }
 .section { padding: 12px; }
 .panel {
@@ -83,11 +84,14 @@ body {
 .panel h3 { margin: 0 0 8px 0; font-size: 16px; }
 
 .app-footer {
-  position: fixed; bottom: 0; left: 0; right: 0; height: 10vh; min-height: 56px; display: flex; align-items: center; justify-content: space-around;
+  position: fixed; bottom: 0; left: 0; right: 0; height: 8vh; min-height: 48px; display: flex; align-items: center; justify-content: space-around;
   background: #ffffff; border-top: 1px solid #e5e7eb; z-index: 1000;
 }
-.tab-btn { background: transparent; border: none; font-size: 15px; color: #374151; padding: 10px 16px; border-radius: 8px; }
-.tab-btn.active { color: #2563eb; font-weight: 600; }
+.tab-btn { background: transparent; border: none; font-size: 15px; color: #374151; padding: 10px 16px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.tab-btn.active { color: #FF6670; font-weight: 600; }
+
+/* 頁尾圖示 */
+.tab-icon { width: 22px; height: 22px; color: currentColor; }
 
 /* 小型裝置優化 */
 @media (max-width: 480px) {

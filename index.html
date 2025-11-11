@@ -27,12 +27,12 @@
           <div class="brand-icon" aria-hidden="true">
             <!-- 打卡系統圖形：簡化 SVG -->
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="10" stroke="#2563eb" stroke-width="2" />
-              <path d="M12 6v6l4 2" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
+              <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
           <div class="brand-text">
-            <div class="brand-title">西北勤務打卡系統</div>
+            <div class="brand-title">西北打卡系統</div>
             <div class="brand-subtitle">請先登入以繼續</div>
           </div>
         </div>
@@ -60,8 +60,8 @@
         <div class="header-left">
           <div class="header-icon" aria-hidden="true">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="10" stroke="#1f2937" stroke-width="2" />
-              <path d="M12 6v6l4 2" stroke="#1f2937" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
+              <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
           <span class="system-name">西北打卡系統</span>
@@ -111,9 +111,36 @@
 
       <!-- 頁尾：10% 高，固定底部、最上層 -->
       <footer class="app-footer">
-        <button class="tab-btn active" data-tab="home">首頁</button>
-        <button class="tab-btn" data-tab="checkin">打卡</button>
-        <button class="tab-btn" data-tab="settings">設定</button>
+        <button class="tab-btn active" data-tab="home" aria-label="首頁">
+          <div class="tab-icon" aria-hidden="true">
+            <!-- Home -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 10l9-7 9 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M5 10v8h14v-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div class="tab-label">首頁</div>
+        </button>
+        <button class="tab-btn" data-tab="checkin" aria-label="打卡">
+          <div class="tab-icon" aria-hidden="true">
+            <!-- Clock -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+              <path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div class="tab-label">打卡</div>
+        </button>
+        <button class="tab-btn" data-tab="settings" aria-label="設定">
+          <div class="tab-icon" aria-hidden="true">
+            <!-- Gear (簡化) -->
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" />
+              <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="tab-label">設定</div>
+        </button>
       </footer>
     </div>
 
