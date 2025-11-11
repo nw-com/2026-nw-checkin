@@ -38,6 +38,16 @@ body {
 .muted { color: #6b7280; }
 .google-icon { width: 18px; height: 18px; }
 
+/* 表單樣式 */
+.login-form { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.label { font-size: 13px; color: #374151; }
+.input {
+  width: 100%; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 10px 12px; font-size: 14px; color: #111827;
+}
+.input:focus { outline: 2px solid #93c5fd; border-color: #93c5fd; }
+.login-actions { display: flex; gap: 8px; margin-top: 6px; }
+
 /* 主頁固定版面（10/10/70/10） */
 .app-view { min-height: 100vh; }
 .hidden { display: none; }

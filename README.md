@@ -92,3 +92,15 @@ python -m http.server 5500
 ## 常見問題
 - 看見「請完成最後的設定步驟」：代表你尚未於 `app.js` 填入 Firebase 設定，請依指示補齊。
 - Google 登入跳出視窗被攔截：請允許彈出視窗，或改用 redirect 登入流程。
+
+## 登入方式（Email/密碼，不用 Google）
+- 已改為使用 Email/密碼登入，登入頁新增表單與「初始化管理員」按鈕。
+- 你可直接輸入預設：`admin@nw-checkin.local` / `Admin2026!` 登入；若尚未建立，按「初始化管理員」即可建立帳號並賦予「系統管理員」角色。
+- 初始化後，請到 Firebase Console（Authentication）重設管理員密碼，並保留 Firestore `users/{uid}.role = 系統管理員`。
+
+## 管理員初始化與重設
+1. 開啟登入頁，輸入 Email 與密碼（或使用預設）。
+2. 點選「初始化管理員」，系統會建立 Firebase 帳號並於 Firestore 寫入 `users/{uid}` 文件：
+   - 欄位：`{ role: "系統管理員", name: <email>, createdAt: <serverTimestamp> }`
+3. 自動登入完成後，你可以在「設定」分頁或直接於 Console 調整其他使用者角色。
+4. 若不再需要預設帳密提示，可在 `index.html` 移除登入卡片中的提示文字。

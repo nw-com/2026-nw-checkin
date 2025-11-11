@@ -37,10 +37,19 @@
           </div>
         </div>
 
-        <button id="googleSignIn" class="btn btn-google" disabled>
-          <img class="google-icon" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" />
-          使用 Google 登入
-        </button>
+        <div class="login-form">
+          <label class="label">電子郵件</label>
+          <input id="emailInput" type="email" class="input" placeholder="admin@nw-checkin.local" />
+          <label class="label">密碼</label>
+          <input id="passwordInput" type="password" class="input" placeholder="Admin2026!" />
+          <div class="login-actions">
+            <button id="emailSignIn" class="btn btn-primary" disabled>登入</button>
+            <button id="initAdminBtn" class="btn">初始化管理員</button>
+          </div>
+          <p class="muted" style="margin-top:8px;">
+            預設管理員：<code>admin@nw-checkin.local</code> / <code>Admin2026!</code>（登入後請至 Firebase 重設密碼）
+          </p>
+        </div>
       </div>
     </div>
 

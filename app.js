@@ -31,7 +31,10 @@ export const Roles = [
 const loginView = document.getElementById("login-view");
 const appView = document.getElementById("app-view");
 const setupWarning = document.getElementById("setup-warning");
-const googleSignInBtn = document.getElementById("googleSignIn");
+const emailInput = document.getElementById("emailInput");
+const passwordInput = document.getElementById("passwordInput");
+const emailSignInBtn = document.getElementById("emailSignIn");
+const initAdminBtn = document.getElementById("initAdminBtn");
 
 const userNameEl = document.getElementById("userName");
 const userPhotoEl = document.getElementById("userPhoto");
@@ -60,10 +63,10 @@ if (!isConfigReady()) {
   setupWarning.classList.remove("hidden");
   loginView.classList.remove("hidden");
   appView.classList.add("hidden");
-  googleSignInBtn.disabled = true;
+  emailSignInBtn.disabled = true;
 } else {
   setupWarning.classList.add("hidden");
-  googleSignInBtn.disabled = false;
+  emailSignInBtn.disabled = false;
 }
 
 // ===== 4) 動態載入 Firebase 模組並初始化 =====
@@ -71,7 +74,7 @@ let firebaseApp, auth, db;
 
 async function ensureFirebase() {
   if (!isConfigReady()) return;
-  const [{ initializeApp }, { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut }, { getFirestore, doc, getDoc, setDoc, addDoc, collection, serverTimestamp }]
+  const [{ initializeApp }, { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword }, { getFirestore, doc, getDoc, setDoc, addDoc, collection, serverTimestamp }]
     = await Promise.all([
       import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
       import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
@@ -83,13 +86,33 @@ async function ensureFirebase() {
   auth = getAuth(firebaseApp);
   db = getFirestore(firebaseApp);
 
-  // 綁定登入事件
-  googleSignInBtn.addEventListener("click", async () => {
+  // 綁定 Email/密碼登入
+  emailSignInBtn.addEventListener("click", async () => {
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+    if (!email || !password) {
+      alert("請輸入電子郵件與密碼");
+      return;
+    }
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      await signInWithEmailAndPassword(auth, email, password);
     } catch (err) {
       alert(`登入失敗：${err?.message || err}`);
+    }
+  });
+
+  // 初始化管理員（建立帳號 + 設定 role = 系統管理員）
+  initAdminBtn.addEventListener("click", async () => {
+    const email = emailInput.value.trim() || "admin@nw-checkin.local";
+    const password = passwordInput.value || "Admin2026!";
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      const user = cred.user;
+      const userDocRef = doc(db, "users", user.uid);
+      await setDoc(userDocRef, { role: "系統管理員", name: user.email || "管理員", createdAt: serverTimestamp() });
+      alert("管理員初始化完成，已自動登入。");
+    } catch (err) {
+      alert(`初始化失敗：${err?.message || err}`);
     }
   });
 
