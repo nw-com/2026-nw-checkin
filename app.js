@@ -57,6 +57,31 @@ const leaderSubTitle = document.getElementById("leaderSubTitle");
 const manageSubTitle = document.getElementById("manageSubTitle");
 const featureSubTitle = document.getElementById("featureSubTitle");
 
+// ===== 2.1) 互動增強：按鈕按下（滑鼠/觸控）效果 =====
+function attachPressInteractions(el) {
+  if (!el) return;
+  const add = () => {
+    // 避免 disabled 元素進入 pressed 狀態
+    if (el.disabled) return;
+    el.classList.add("pressed");
+  };
+  const remove = () => {
+    el.classList.remove("pressed");
+  };
+  el.addEventListener("mousedown", add);
+  el.addEventListener("mouseup", remove);
+  el.addEventListener("mouseleave", remove);
+  el.addEventListener("touchstart", add, { passive: true });
+  el.addEventListener("touchend", remove);
+  el.addEventListener("touchcancel", remove);
+}
+
+// 對現有按鈕立即掛載互動效果
+[...document.querySelectorAll(".btn, .tab-btn")].forEach(attachPressInteractions);
+attachPressInteractions(document.getElementById("checkinBtn"));
+attachPressInteractions(document.getElementById("emailSignIn"));
+attachPressInteractions(document.getElementById("initAdminBtn"));
+
 // ===== 3) 檢查是否已設定 API 金鑰 =====
 function isConfigReady() {
   const cfg = FIREBASE_CONFIG || {};
@@ -183,6 +208,8 @@ async function ensureFirebase() {
       btn.textContent = label;
       btn.dataset.subtab = label;
       btn.addEventListener("click", () => setActiveSubTab(label));
+      // 掛載按鈕按下互動效果（滑鼠/觸控）
+      attachPressInteractions(btn);
       subTabsEl.appendChild(btn);
       if (idx === 0) activeSubTab = label;
     });
