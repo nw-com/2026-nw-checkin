@@ -879,6 +879,14 @@ async function ensureFirebase() {
       // 從 Firestore 載入 users 清單，帶入帳號列表
       await loadAccountsFromFirestore();
 
+      // 從 Firestore 載入 設定→一般 所需清單（公司、區域、證照）
+      await Promise.all([
+        loadCompaniesFromFirestore(),
+        loadRegionsFromFirestore(),
+        loadLicensesFromFirestore(),
+      ]);
+      if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
+
         // 啟用定位顯示
         initGeolocation();
 
@@ -939,6 +947,60 @@ async function ensureFirebase() {
       if (activeMainTab === "settings" && activeSubTab === "帳號") renderSettingsContent("帳號");
     } catch (err) {
       console.warn("載入 Firestore users 失敗：", err);
+    }
+  }
+
+  async function loadCompaniesFromFirestore() {
+    if (!db || !fns.getDocs || !fns.collection) return;
+    try {
+      const snap = await fns.getDocs(fns.collection(db, "companies"));
+      const items = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        items.push({ id: docSnap.id, name: d.name || "", coords: d.coords || "" });
+      });
+      items.forEach((it) => {
+        const idx = appState.companies.findIndex((a) => a.id === it.id);
+        if (idx >= 0) appState.companies[idx] = { ...appState.companies[idx], ...it }; else appState.companies.push(it);
+      });
+    } catch (err) {
+      console.warn("載入 Firestore companies 失敗：", err);
+    }
+  }
+
+  async function loadRegionsFromFirestore() {
+    if (!db || !fns.getDocs || !fns.collection) return;
+    try {
+      const snap = await fns.getDocs(fns.collection(db, "regions"));
+      const items = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        items.push({ id: docSnap.id, name: d.name || "" });
+      });
+      items.forEach((it) => {
+        const idx = appState.regions.findIndex((a) => a.id === it.id);
+        if (idx >= 0) appState.regions[idx] = { ...appState.regions[idx], ...it }; else appState.regions.push(it);
+      });
+    } catch (err) {
+      console.warn("載入 Firestore regions 失敗：", err);
+    }
+  }
+
+  async function loadLicensesFromFirestore() {
+    if (!db || !fns.getDocs || !fns.collection) return;
+    try {
+      const snap = await fns.getDocs(fns.collection(db, "licenses"));
+      const items = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        items.push({ id: docSnap.id, name: d.name || "" });
+      });
+      items.forEach((it) => {
+        const idx = appState.licenses.findIndex((a) => a.id === it.id);
+        if (idx >= 0) appState.licenses[idx] = { ...appState.licenses[idx], ...it }; else appState.licenses.push(it);
+      });
+    } catch (err) {
+      console.warn("載入 Firestore licenses 失敗：", err);
     }
   }
 
