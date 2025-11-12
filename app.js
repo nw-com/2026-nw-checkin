@@ -363,8 +363,10 @@ function showProfileModal(user, role) {
     ],
     onSubmit: async () => {
       try {
-        if (typeof signOut === "function" && auth) {
-          await signOut(auth);
+        if (typeof fns.signOut === "function" && auth) {
+          await fns.signOut(auth);
+        } else {
+          throw new Error("Auth 未初始化或 signOut 不可用");
         }
         return true;
       } catch (e) {
@@ -1008,6 +1010,7 @@ let firebaseApp, auth, db;
 let fns = {
   signInWithEmailAndPassword: null,
   createUserWithEmailAndPassword: null,
+  signOut: null,
   doc: null,
   getDoc: null,
   setDoc: null,
@@ -1035,6 +1038,7 @@ async function ensureFirebase() {
   // 將函式指派到外層供事件使用
   fns.signInWithEmailAndPassword = signInWithEmailAndPassword;
   fns.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+  fns.signOut = signOut;
   fns.doc = doc;
   fns.getDoc = getDoc;
   fns.setDoc = setDoc;
