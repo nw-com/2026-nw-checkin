@@ -62,12 +62,20 @@ function updateHomeMap() {
   const { latitude, longitude } = lastCoords;
   const lat = Number(latitude).toFixed(6);
   const lon = Number(longitude).toFixed(6);
-  // 使用 OpenStreetMap 靜態地圖服務（免金鑰），瀏覽器按高度縮放至 header 高度
-  const url = `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lon}&zoom=14&size=1200x400&markers=${lat},${lon},red-pushpin`;
+  // 使用 Google 靜態地圖（目前位置）並疊加於頁首紅色區塊
+  const size = "1200x600"; // 大尺寸以便縮放覆蓋 40vh
+  const zoom = 15;
+  const marker = `markers=color:red|${lat},${lon}`;
+  const url = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=${zoom}&size=${size}&maptype=roadmap&${marker}&key=${GOOGLE_MAPS_API_KEY}`;
   homeMapImg.src = url;
 }
 
 function two(n) { return n < 10 ? "0" + n : "" + n; }
+function nowInTZ(tz) {
+  // 取得指定時區的本地時間對應的 Date 物件
+  const str = new Date().toLocaleString('en-US', { timeZone: tz });
+  return new Date(str);
+}
 function formatDateYYYYMMDD(d) {
   return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
 }
@@ -103,17 +111,19 @@ function getApproxSolarTerm(date) {
   return terms[md] || '';
 }
 function getLunarString(d) {
+  // 優先使用 Intl 中文曆（指定台灣時區），部分行動裝置會因時區差造成隔天偏移
   try {
-    const fmt = new Intl.DateTimeFormat('zh-Hant-u-ca-chinese', { year: 'numeric', month: 'long', day: 'numeric' });
-    const lunar = fmt.format(d); // 例如：甲辰年十月初四
+    const fmt = new Intl.DateTimeFormat('zh-TW-u-ca-chinese', { timeZone: 'Asia/Taipei', year: 'numeric', month: 'long', day: 'numeric' });
+    const lunar = fmt.format(d);
     const term = getApproxSolarTerm(d);
     return term ? `農曆 ${lunar}（${term}）` : `農曆 ${lunar}`;
   } catch (e) {
-    return '農曆（裝置不支援顯示）';
+    // 後備：顯示簡短文字，避免手機不支援時顯示錯誤內容
+    return '農曆（裝置不支援）';
   }
 }
 function updateHomeClockOnce() {
-  const now = new Date();
+  const now = nowInTZ('Asia/Taipei');
   if (homeTimeEl) homeTimeEl.textContent = `${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`;
   if (homeDateEl) homeDateEl.textContent = `${formatDateYYYYMMDD(now)}`;
   if (homeLunarEl) homeLunarEl.textContent = getLunarString(now);

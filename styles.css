@@ -264,17 +264,14 @@ button[disabled] { cursor: not-allowed; }
   top: 0;
   left: 0;
   right: 0;
-  height: 8vh;
-  min-height: 48px;
-  display: grid;
-  place-items: center;
+  height: 40vh; /* 與首頁 header 同高，覆蓋整個紅色區塊 */
+  min-height: 40vh;
   z-index: 2000;
-  opacity: 0.10;
+  opacity: 0.40; /* 提高透明度至 40% */
   pointer-events: none; /* 不阻擋點擊 */
 }
 .home-layout .home-map-overlay img {
+  width: 100%;
   height: 100%;
-  max-width: 90%;
-  object-fit: cover;
-  border-radius: 8px;
+  object-fit: cover; /* 填滿 header 高度 */
 }
