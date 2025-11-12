@@ -1377,7 +1377,7 @@ function renderSettingsAccounts() {
               }
               if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
 
-              // 若提供新密碼且確認一致，呼叫雲端函式更新 Auth 密碼
+              // 若提供新密碼且確認一致，嘗試更新 Auth 密碼；失敗時改寄送重設密碼信
               if (d.password && d.passwordConfirm) {
                 if (d.password !== d.passwordConfirm) {
                   alert("新密碼與確認密碼不一致。");
@@ -1393,13 +1393,35 @@ function renderSettingsAccounts() {
                     });
                     alert("已更新登入頁面的密碼。");
                   } catch (err) {
-                    console.warn("adminUpdateUserPassword 失敗", err);
-                    alert("更新登入密碼失敗：請稍後重試或確認雲端函式部署與權限設定。");
-                    return false;
+                    console.warn("adminUpdateUserPassword 失敗，改寄送重設密碼信", err);
+                    const targetEmail = a.email || d.email || null;
+                    if (targetEmail && fns.sendPasswordResetEmail && auth) {
+                      try {
+                        await fns.sendPasswordResetEmail(auth, targetEmail);
+                        alert(`已寄送重設密碼信到「${targetEmail}」。`);
+                      } catch (e2) {
+                        alert(`更新登入密碼失敗且寄送重設信也失敗：${e2?.message || e2}`);
+                        return false;
+                      }
+                    } else {
+                      alert("更新登入密碼失敗：未取得使用者 Email 或尚未初始化寄送重設密碼功能。");
+                      return false;
+                    }
                   }
                 } else {
-                  alert("尚未設定雲端函式，無法更新登入密碼。");
-                  return false;
+                  const targetEmail = a.email || d.email || null;
+                  if (targetEmail && fns.sendPasswordResetEmail && auth) {
+                    try {
+                      await fns.sendPasswordResetEmail(auth, targetEmail);
+                      alert(`尚未設定雲端函式，已改寄送重設密碼信到「${targetEmail}」。`);
+                    } catch (e2) {
+                      alert(`尚未設定雲端函式且寄送重設信也失敗：${e2?.message || e2}`);
+                      return false;
+                    }
+                  } else {
+                    alert("尚未設定雲端函式且無法寄送重設密碼信（缺少 Email 或初始化）。");
+                    return false;
+                  }
                 }
               }
 
@@ -1480,7 +1502,17 @@ function renderSettingsAccounts() {
           return;
         }
         if (!(fns.functions && fns.httpsCallable)) {
-          alert("尚未設定雲端函式，無法更新登入密碼。");
+          const targetEmail = a.email || null;
+          if (targetEmail && fns.sendPasswordResetEmail && auth) {
+            try {
+              await fns.sendPasswordResetEmail(auth, targetEmail);
+              alert(`尚未設定雲端函式，已改寄送重設密碼信到「${targetEmail}」。`);
+            } catch (e2) {
+              alert(`尚未設定雲端函式且寄送重設信也失敗：${e2?.message || e2}`);
+            }
+          } else {
+            alert("尚未設定雲端函式且無法寄送重設密碼信（缺少 Email 或初始化）。");
+          }
           return;
         }
         try {
@@ -1495,7 +1527,17 @@ function renderSettingsAccounts() {
           a.password = newPwd;
           a.passwordConfirm = newConfirm;
         } catch (err) {
-          alert(`更新登入密碼失敗：${err?.message || err}`);
+          const targetEmail = a.email || null;
+          if (targetEmail && fns.sendPasswordResetEmail && auth) {
+            try {
+              await fns.sendPasswordResetEmail(auth, targetEmail);
+              alert(`更新登入密碼失敗，已改寄送重設密碼信到「${targetEmail}」。`);
+            } catch (e2) {
+              alert(`更新登入密碼失敗且寄送重設信也失敗：${e2?.message || e2}`);
+            }
+          } else {
+            alert(`更新登入密碼失敗：${err?.message || err}`);
+          }
         }
       });
     });
@@ -1641,6 +1683,7 @@ let firebaseApp, auth, db, functionsApp;
   signInWithEmailAndPassword: null,
   createUserWithEmailAndPassword: null,
   signOut: null,
+  sendPasswordResetEmail: null,
   doc: null,
   getDoc: null,
   setDoc: null,
@@ -1658,7 +1701,7 @@ let firebaseApp, auth, db, functionsApp;
   if (!isConfigReady()) return;
   const [
     { initializeApp },
-    { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword },
+    { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
     { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp },
     { getFunctions, httpsCallable },
   ] = await Promise.all([
@@ -1679,6 +1722,7 @@ let firebaseApp, auth, db, functionsApp;
   fns.signInWithEmailAndPassword = signInWithEmailAndPassword;
   fns.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
   fns.signOut = signOut;
+  fns.sendPasswordResetEmail = sendPasswordResetEmail;
   fns.doc = doc;
   fns.getDoc = getDoc;
   fns.setDoc = setDoc;
