@@ -230,9 +230,13 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
       }
     }
     const ok = await onSubmit?.(data);
-    if (ok !== false) closeModal();
-    const lbl = featureSubTitle?.textContent?.trim();
-    renderSettingsContent(lbl);
+    // 若 onSubmit 明確回傳 false，視為失敗不關閉視窗；成功則關閉並回到目前子分頁列表
+    if (ok !== false) {
+      closeModal();
+      if (activeMainTab === "settings" && activeSubTab) {
+        renderSettingsContent(activeSubTab);
+      }
+    }
   });
   footer.appendChild(btnCancel);
   footer.appendChild(btnSubmit);
@@ -394,8 +398,15 @@ function renderSettingsGeneral() {
         { key: "name", label: "名稱", type: "text" },
         { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
       ],
-      onSubmit: (data) => {
-        appState.companies.push({ id: id(), name: data.name || "", coords: data.coords || "" });
+      onSubmit: async (data) => {
+        try {
+          if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
+          const docRef = await fns.addDoc(fns.collection(db, "companies"), { name: data.name || "", coords: data.coords || "", createdAt: fns.serverTimestamp() });
+          appState.companies.push({ id: docRef.id, name: data.name || "", coords: data.coords || "" });
+        } catch (err) {
+          alert(`儲存公司失敗：${err?.message || err}`);
+          return false;
+        }
       },
     });
   });
@@ -434,7 +445,16 @@ function renderSettingsGeneral() {
     openModal({
       title: "新增區域",
       fields: [{ key: "name", label: "名稱", type: "text" }],
-      onSubmit: (data) => { appState.regions.push({ id: id(), name: data.name || "" }); },
+      onSubmit: async (data) => {
+        try {
+          if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
+          const docRef = await fns.addDoc(fns.collection(db, "regions"), { name: data.name || "", createdAt: fns.serverTimestamp() });
+          appState.regions.push({ id: docRef.id, name: data.name || "" });
+        } catch (err) {
+          alert(`儲存區域失敗：${err?.message || err}`);
+          return false;
+        }
+      },
     });
   });
   settingsContent.querySelectorAll("#block-regions tbody tr").forEach((tr) => {
@@ -457,7 +477,20 @@ function renderSettingsGeneral() {
   const btnAddLicense = document.getElementById("btnAddLicense");
   attachPressInteractions(btnAddLicense);
   btnAddLicense.addEventListener("click", () => {
-    openModal({ title: "新增證照", fields: [{ key: "name", label: "名稱", type: "text" }], onSubmit: (d) => { appState.licenses.push({ id: id(), name: d.name || "" }); } });
+    openModal({
+      title: "新增證照",
+      fields: [{ key: "name", label: "名稱", type: "text" }],
+      onSubmit: async (d) => {
+        try {
+          if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
+          const docRef = await fns.addDoc(fns.collection(db, "licenses"), { name: d.name || "", createdAt: fns.serverTimestamp() });
+          appState.licenses.push({ id: docRef.id, name: d.name || "" });
+        } catch (err) {
+          alert(`儲存證照失敗：${err?.message || err}`);
+          return false;
+        }
+      },
+    });
   });
   settingsContent.querySelectorAll("#block-licenses tbody tr").forEach((tr) => {
     const lid = tr.dataset.id;
@@ -507,7 +540,17 @@ function renderSettingsCommunities() {
         { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
         { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
       ],
-      onSubmit: (d) => { appState.communities.push({ id: id(), ...d }); },
+      onSubmit: async (d) => {
+        try {
+          if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
+          const payload = { code: d.code || "", name: d.name || "", households: d.households ?? null, regionId: d.regionId || null, companyId: d.companyId || null, coords: d.coords || "", createdAt: fns.serverTimestamp() };
+          const docRef = await fns.addDoc(fns.collection(db, "communities"), payload);
+          appState.communities.push({ id: docRef.id, ...d });
+        } catch (err) {
+          alert(`儲存社區失敗：${err?.message || err}`);
+          return false;
+        }
+      },
     });
   });
 
@@ -640,7 +683,38 @@ function renderSettingsAccounts() {
         ] },
         { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
       ],
-      onSubmit: (d) => { appState.accounts.push({ id: id(), ...d }); },
+      onSubmit: async (d) => {
+        try {
+          if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
+          const payload = {
+            photoUrl: d.photoUrl || "",
+            name: d.name || "",
+            title: d.title || "",
+            email: d.email || "",
+            phone: d.phone || "",
+            // 密碼僅作顯示用，不會在此自動建立 Auth 帳號
+            password: d.password || "",
+            passwordConfirm: d.passwordConfirm || "",
+            emergencyName: d.emergencyName || "",
+            emergencyRelation: d.emergencyRelation || "",
+            emergencyPhone: d.emergencyPhone || "",
+            bloodType: d.bloodType || "",
+            birthdate: d.birthdate || "",
+            licenses: Array.isArray(d.licenses) ? d.licenses : [],
+            role: d.role || "一般",
+            companyId: d.companyId || null,
+            serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
+            pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : [],
+            status: d.status || "在職",
+            createdAt: fns.serverTimestamp(),
+          };
+          const docRef = await fns.addDoc(fns.collection(db, "users"), payload);
+          appState.accounts.push({ id: docRef.id, ...d });
+        } catch (err) {
+          alert(`儲存帳號失敗：${err?.message || err}`);
+          return false;
+        }
+      },
     });
   });
 
