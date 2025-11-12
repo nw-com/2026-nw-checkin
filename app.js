@@ -1471,14 +1471,63 @@ function renderSettingsAccounts() {
       const item = appState.pendingAccounts.find((x) => x.id === pid);
       if (!act || !item) return;
       if (act === "approve") {
-        const approved = { ...item, status: "在職" };
-        appState.accounts.push(approved);
-        appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
-        renderSettingsContent("帳號");
+        (async () => {
+          try {
+            if (appState.currentUserRole !== "系統管理員") {
+              alert("權限不足：只有系統管理員可以核准帳號。");
+              return;
+            }
+            // 寫入 users 集合（不含密碼），狀態設為在職
+            if (!db || !fns.addDoc || !fns.collection || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            const payload = {
+              photoUrl: item.photoUrl || "",
+              name: item.name || "",
+              title: item.title || "",
+              email: item.email || "",
+              phone: item.phone || "",
+              licenses: Array.isArray(item.licenses) ? item.licenses : [],
+              role: item.role || "一般",
+              companyId: item.companyId || null,
+              serviceCommunities: Array.isArray(item.serviceCommunities) ? item.serviceCommunities : [],
+              pagePermissions: Array.isArray(item.pagePermissions) ? item.pagePermissions : [],
+              status: "在職",
+              createdAt: fns.serverTimestamp(),
+            };
+            const userDoc = await fns.addDoc(fns.collection(db, "users"), payload);
+
+            // 可選：建立 Auth 帳號，預設密碼為 000000（可在帳號列表中再更新）
+            if (fns.functions && fns.httpsCallable && item.email) {
+              try {
+                const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
+                await createUser({ email: item.email, password: "000000", name: item.name || "", photoUrl: item.photoUrl || "" });
+              } catch (err) {
+                console.warn("核准時建立 Auth 失敗", err);
+                alert("警告：未能建立登入帳號（Auth）。你可稍後在帳號列表編輯密碼或部署雲端函式。");
+              }
+            }
+
+            // 刪除待審核紀錄
+            await fns.deleteDoc(fns.doc(db, "pendingAccounts", pid));
+
+            // 更新前端狀態與 UI
+            appState.accounts.push({ id: userDoc.id, ...payload });
+            appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
+            renderSettingsContent("帳號");
+          } catch (err) {
+            alert(`核准帳號失敗：${err?.message || err}`);
+          }
+        })();
       } else if (act === "del") {
         (async () => {
           const ok = await confirmAction({ title: "確認刪除待審核帳號", text: `確定要刪除此待審核帳號「${item.name || item.email || pid}」嗎？`, confirmText: "刪除" });
           if (!ok) return;
+          try {
+            if (db && fns.deleteDoc && fns.doc) {
+              await fns.deleteDoc(fns.doc(db, "pendingAccounts", pid));
+            }
+          } catch (err) {
+            console.warn("刪除 Firestore 待審核紀錄失敗：", err);
+          }
           appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
           renderSettingsContent("帳號");
         })();
@@ -1616,6 +1665,8 @@ async function ensureFirebase() {
         loadLicensesFromFirestore(),
         loadCommunitiesFromFirestore(),
       ]);
+      // 載入待審核帳號
+      await loadPendingAccountsFromFirestore();
       if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
 
         // 啟用定位顯示
