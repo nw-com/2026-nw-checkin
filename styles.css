@@ -102,6 +102,7 @@ button[disabled] { cursor: not-allowed; }
   padding-top: calc(8vh + 6vh + 12px);
   padding-bottom: calc(8vh + 12px);
   min-height: 78vh;
+  background: #EEEEEE;
 }
 .section { padding: 12px; }
 .panel {
@@ -114,7 +115,14 @@ button[disabled] { cursor: not-allowed; }
 .btn-sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
 
 /* 設定分頁內表格與列表樣式 */
-.block { margin-top: 16px; }
+.block {
+  margin-top: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+}
 .block-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .block-title { font-weight: 600; font-size: 15px; }
 .block-actions { display: flex; gap: 8px; }
