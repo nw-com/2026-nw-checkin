@@ -120,6 +120,8 @@ const appState = {
   communities: [],
   accounts: [],
   pendingAccounts: [],
+  currentUserId: null,
+  currentUserRole: null,
 };
 
 function id() {
@@ -838,6 +840,10 @@ function renderSettingsAccounts() {
       ],
       onSubmit: async (d) => {
         try {
+          if (appState.currentUserRole !== "系統管理員") {
+            alert("權限不足：只有系統管理員可以新增帳號。");
+            return false;
+          }
           if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
           const payload = {
             photoUrl: d.photoUrl || "",
@@ -910,6 +916,10 @@ function renderSettingsAccounts() {
           initial: a,
           onSubmit: async (d) => {
             try {
+              if (appState.currentUserRole !== "系統管理員") {
+                alert("權限不足：只有系統管理員可以編輯帳號。");
+                return false;
+              }
               if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
               const payload = {
                 photoUrl: d.photoUrl ?? a.photoUrl ?? "",
@@ -943,6 +953,10 @@ function renderSettingsAccounts() {
         });
       } else if (act === "del") {
         (async () => {
+          if (appState.currentUserRole !== "系統管理員") {
+            alert("權限不足：只有系統管理員可以刪除帳號。");
+            return;
+          }
           const ok = await confirmAction({ title: "確認刪除帳號", text: `確定要刪除帳號「${a.name || a.email || aid}」嗎？此動作無法復原。`, confirmText: "刪除" });
           if (!ok) return;
           try {
@@ -1079,6 +1093,9 @@ async function ensureFirebase() {
       } else {
         await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
       }
+      // 將目前使用者資訊保存於 appState 供權限檢查
+      appState.currentUserId = user.uid;
+      appState.currentUserRole = role;
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
@@ -1092,6 +1109,7 @@ async function ensureFirebase() {
         loadCompaniesFromFirestore(),
         loadRegionsFromFirestore(),
         loadLicensesFromFirestore(),
+        loadCommunitiesFromFirestore(),
       ]);
       if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
 
@@ -1133,15 +1151,24 @@ async function ensureFirebase() {
         const d = docSnap.data() || {};
         items.push({
           id: docSnap.id,
+          photoUrl: d.photoUrl || "",
           name: d.name || "",
-          email: d.email || "",
-          role: d.role || "一般",
-          status: d.status || "在職",
           title: d.title || "",
+          email: d.email || "",
           phone: d.phone || "",
+          password: d.password || "",
+          passwordConfirm: d.passwordConfirm || "",
+          emergencyName: d.emergencyName || "",
+          emergencyRelation: d.emergencyRelation || "",
+          emergencyPhone: d.emergencyPhone || "",
+          bloodType: d.bloodType || "",
+          birthdate: d.birthdate || "",
           licenses: Array.isArray(d.licenses) ? d.licenses : [],
+          role: d.role || "一般",
           companyId: d.companyId || null,
           serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
+          pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : [],
+          status: d.status || "在職",
         });
       });
       items.forEach((it) => {
@@ -1209,6 +1236,33 @@ async function ensureFirebase() {
       });
     } catch (err) {
       console.warn("載入 Firestore licenses 失敗：", err);
+    }
+  }
+
+  async function loadCommunitiesFromFirestore() {
+    if (!db || !fns.getDocs || !fns.collection) return;
+    try {
+      const snap = await fns.getDocs(fns.collection(db, "communities"));
+      const items = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        items.push({
+          id: docSnap.id,
+          code: d.code || "",
+          name: d.name || "",
+          households: d.households ?? null,
+          regionId: d.regionId || null,
+          companyId: d.companyId || null,
+          coords: d.coords || "",
+        });
+      });
+      items.forEach((it) => {
+        const idx = appState.communities.findIndex((a) => a.id === it.id);
+        if (idx >= 0) appState.communities[idx] = { ...appState.communities[idx], ...it }; else appState.communities.push(it);
+      });
+      if (activeMainTab === "settings" && activeSubTab === "社區") renderSettingsContent("社區");
+    } catch (err) {
+      console.warn("載入 Firestore communities 失敗：", err);
     }
   }
 
