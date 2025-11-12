@@ -38,7 +38,6 @@ const setupWarning = document.getElementById("setup-warning");
 const emailInput = document.getElementById("emailInput");
 const passwordInput = document.getElementById("passwordInput");
 const emailSignInBtn = document.getElementById("emailSignIn");
-const initAdminBtn = document.getElementById("initAdminBtn");
 const applyAccountBtn = document.getElementById("applyAccountBtn");
 const togglePasswordBtn = document.getElementById("togglePassword");
 const togglePasswordIcon = document.getElementById("togglePasswordIcon");
@@ -89,7 +88,6 @@ function attachPressInteractions(el) {
 [...document.querySelectorAll(".btn, .tab-btn")].forEach(attachPressInteractions);
 attachPressInteractions(document.getElementById("checkinBtn"));
 attachPressInteractions(document.getElementById("emailSignIn"));
-attachPressInteractions(document.getElementById("initAdminBtn"));
 attachPressInteractions(document.getElementById("applyAccountBtn"));
 attachPressInteractions(togglePasswordBtn);
 
@@ -553,7 +551,7 @@ function showProfileModal(user, role) {
         if (typeof fns.serverTimestamp === "function") payload.updatedAt = fns.serverTimestamp();
         await fns.setDoc(fns.doc(db, "users", user.uid), payload, { merge: true });
         if (typeof payload.photoUrl === "string" && userPhotoEl) userPhotoEl.src = payload.photoUrl;
-        if (typeof payload.name === "string") userNameEl.textContent = payload.name || userNameEl.textContent;
+        if (typeof payload.name === "string") userNameEl.textContent = payload.name ? `歡迎~ ${payload.name}` : userNameEl.textContent;
         return true;
       } catch (e) {
         alert("儲存個人照片失敗：" + (e?.message || e));
@@ -1745,7 +1743,7 @@ let firebaseApp, auth, db, functionsApp;
         appView.classList.remove("hidden");
 
       // 先以 Auth 設定頁首使用者資訊（後續以 Firestore 覆蓋）
-      userNameEl.textContent = user.displayName || user.email || "使用者";
+        userNameEl.textContent = `歡迎~ ${user.displayName || user.email || "使用者"}`;
       if (userPhotoEl) {
         if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
         // 將頭像設為按鈕：點擊開啟個人資訊與登出
@@ -1761,7 +1759,7 @@ let firebaseApp, auth, db, functionsApp;
         role = data.role || role;
         // 以 Firestore 使用者資料覆蓋頁首姓名與照片（若有）
         const displayName = data.name || user.displayName || user.email || "使用者";
-        userNameEl.textContent = displayName;
+        userNameEl.textContent = `歡迎~ ${displayName}`;
         if (userPhotoEl) {
           const photoFromDoc = data.photoUrl || "";
           if (photoFromDoc) userPhotoEl.src = photoFromDoc; else if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
@@ -2151,26 +2149,7 @@ emailSignInBtn?.addEventListener("click", async () => {
   }
 });
 
-initAdminBtn?.addEventListener("click", async () => {
-  const email = emailInput.value.trim() || "admin@nw-checkin.local";
-  const password = passwordInput.value || "Admin2026!";
-  if (!isConfigReady()) {
-    alert("尚未設定 Firebase 金鑰，請於 app.js 補齊。");
-    return;
-  }
-  if (!auth || !fns.createUserWithEmailAndPassword) {
-    await ensureFirebase();
-  }
-  try {
-    const cred = await fns.createUserWithEmailAndPassword(auth, email, password);
-    const user = cred.user;
-    const userDocRef = fns.doc(db, "users", user.uid);
-    await fns.setDoc(userDocRef, { role: "系統管理員", name: user.email || "管理員", createdAt: fns.serverTimestamp() });
-    alert("管理員初始化完成，已自動登入。");
-  } catch (err) {
-    alert(`初始化失敗：${err?.message || err}`);
-  }
-});
+// 已移除「初始化管理員」按鈕及其功能
 
 // 啟動：若設定已就緒，先行初始化以載入使用者狀態
 (async () => {
