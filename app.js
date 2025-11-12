@@ -7,7 +7,7 @@ window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
   apiKey: "AIzaSyDdetnrACoNTSV3ZqFBPOSfnZzRtmk5fk8",
   authDomain: "nw-checkin.firebaseapp.com",
   projectId: "nw-checkin",
-  storageBucket: "nw-checkin.firebasestorage.app",
+  storageBucket: "nw-checkin.appspot.com",
   messagingSenderId: "520938520545",
   appId: "1:520938520545:web:fb32a42eb1504aab041ca0",
   measurementId: "G-G6M6NGBC03",
@@ -756,12 +756,13 @@ async function ensureFirebase() {
   fns.collection = collection;
   fns.serverTimestamp = serverTimestamp;
 
-  // 監聽登入狀態
-  onAuthStateChanged(auth, async (user) => {
-    if (user) {
-      // 顯示主頁
-      loginView.classList.add("hidden");
-      appView.classList.remove("hidden");
+  // 監聽登入狀態（容錯：若網路或授權網域設定不完整，改為顯示登入頁）
+  try {
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        // 顯示主頁
+        loginView.classList.add("hidden");
+        appView.classList.remove("hidden");
 
       // 更新頁首使用者資訊
       userNameEl.textContent = user.displayName || user.email || "使用者";
@@ -783,19 +784,27 @@ async function ensureFirebase() {
       }
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
-      // 啟用定位顯示
-      initGeolocation();
+        // 啟用定位顯示
+        initGeolocation();
 
-      // 綁定打卡
-      checkinBtn.addEventListener("click", () => doCheckin(user, role));
-    } else {
-      // 顯示登入頁
-      appView.classList.add("hidden");
-      loginView.classList.remove("hidden");
-      userNameEl.textContent = "未登入";
-      userPhotoEl.removeAttribute("src");
-    }
-  });
+        // 綁定打卡
+        checkinBtn.addEventListener("click", () => doCheckin(user, role));
+      } else {
+        // 顯示登入頁
+        appView.classList.add("hidden");
+        loginView.classList.remove("hidden");
+        userNameEl.textContent = "未登入";
+        userPhotoEl.removeAttribute("src");
+      }
+    });
+  } catch (err) {
+    // 提示使用者可能需要在 Firebase Authentication 設定中加入授權網域（localhost/127.0.0.1）
+    console.warn("Firebase Auth 狀態監聽失敗：", err);
+    setupWarning.classList.remove("hidden");
+    loginView.classList.remove("hidden");
+    appView.classList.add("hidden");
+    emailSignInBtn.disabled = true;
+  }
 
   // 分頁切換
   tabButtons.forEach((btn) => {

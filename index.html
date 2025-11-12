@@ -16,6 +16,7 @@
           這不是程式錯誤，而是必要的設定。基於安全考量，我無法為您產生金鑰，您必須親自完成此設定。<br />
           請打開 <code>app.js</code> 檔案，找到 <code>FIREBASE_CONFIG</code>，並依照註解指示填入金鑰。<br />
           詳細步驟請參考 <code>README.md</code> 檔案。
+          若登入仍失敗，請到 Firebase Console → Authentication → Settings → Authorized domains，加入 <code>localhost</code> 和 <code>127.0.0.1</code>（包含您使用的連接埠）。
         </p>
       </div>
     </div>
@@ -25,10 +26,10 @@
       <div class="login-card">
         <div class="brand">
           <div class="brand-icon" aria-hidden="true">
-            <!-- Check Circle -->
+            <!-- Clock icon（與主頁左側 LOGO 一致） -->
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
-              <path d="M8.5 12.5l2.5 2.5 4.5-5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
+              <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </div>
           <div class="brand-text">

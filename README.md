@@ -76,6 +76,20 @@ npx http-server .
 python -m http.server 5500
 ```
 
+### Firebase 授權網域設定（登入錯誤修正）
+若登入時於瀏覽器主控台看見 `identitytoolkit.googleapis.com` 或 `net::ERR_ABORTED` 相關錯誤，通常是 Firebase Authentication 的「Authorized domains」未包含你的本機預覽網域。
+
+請至 Firebase Console → Authentication → Settings → Authorized domains，加入：
+- `localhost`
+- `127.0.0.1`
+- 視需要加入帶連接埠的網域，例如：`localhost:8000`、`127.0.0.1:5500`
+
+另外請確認 `app.js` 裡的 Firebase 設定：
+- `authDomain` 通常為 `<PROJECT_ID>.firebaseapp.com`
+- `storageBucket` 通常為 `<PROJECT_ID>.appspot.com`
+
+完成設定後重新整理頁面再試。
+
 ## GitHub Pages 部署
 1. 建立 GitHub 倉庫並推送此目錄內容。
 2. 進入 Repository Settings -> Pages，選擇 `main` 分支與根目錄。
