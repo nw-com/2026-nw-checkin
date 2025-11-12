@@ -169,7 +169,7 @@ button[disabled] { cursor: not-allowed; }
 
 .app-footer {
   position: fixed; bottom: 0; left: 0; right: 0; height: 8vh; min-height: 48px; display: flex; align-items: center; justify-content: space-around;
-  background: #EEEEEE; border-top: 1px solid #e5e7eb; z-index: 1000;
+  background: #FFFFFF; border-top: 1px solid #e5e7eb; z-index: 1000;
 }
 .tab-btn { background: transparent; border: none; font-size: 15px; color: #374151; padding: 10px 16px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .tab-btn.active { color: #FF0000; font-weight: 600; }
@@ -184,4 +184,49 @@ button[disabled] { cursor: not-allowed; }
 @media (max-width: 480px) {
   .brand-title { font-size: 18px; }
   .system-name { font-size: 15px; }
+}
+
+/* 首頁專用版面：頁首40%、頁中上0%、頁中52%、頁尾8% */
+.home-layout .app-header {
+  height: 40vh;
+  min-height: 40vh;
+}
+.home-layout .app-subheader {
+  display: none;
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+}
+.home-layout .app-main {
+  /* 避開 40vh 頁首與 8vh 頁尾，保留內容邊距 */
+  padding-top: calc(40vh + 12px);
+  padding-bottom: calc(8vh + 12px);
+  min-height: 52vh;
+}
+
+/* 首頁大圖：50vw，水平置中，介於頁首與頁中之間（疊加顯示） */
+.home-layout .home-hero {
+  position: fixed;
+  top: calc(40vh - 25vw);
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  /* 置於最上層但不阻擋互動 */
+  pointer-events: none;
+}
+.home-layout .home-hero-photo {
+  /* 保持正圓：寬高相同，裁切置中 */
+  width: 50vw;
+  height: 50vw;
+  max-width: 720px;
+  max-height: 720px;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
 }

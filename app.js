@@ -45,6 +45,8 @@ const togglePasswordIcon = document.getElementById("togglePasswordIcon");
 const userNameEl = document.getElementById("userName");
 const userPhotoEl = document.getElementById("userPhoto");
 const subTabsEl = document.getElementById("subTabs");
+const homeHero = document.getElementById("homeHero");
+const homeHeroPhoto = document.getElementById("homeHeroPhoto");
 
 const homeSection = document.getElementById("homeSection");
 const checkinSection = document.getElementById("checkinSection");
@@ -550,7 +552,10 @@ function showProfileModal(user, role) {
         if (Object.keys(payload).length === 0) return true;
         if (typeof fns.serverTimestamp === "function") payload.updatedAt = fns.serverTimestamp();
         await fns.setDoc(fns.doc(db, "users", user.uid), payload, { merge: true });
-        if (typeof payload.photoUrl === "string" && userPhotoEl) userPhotoEl.src = payload.photoUrl;
+        if (typeof payload.photoUrl === "string") {
+          if (userPhotoEl) userPhotoEl.src = payload.photoUrl;
+          if (homeHeroPhoto) homeHeroPhoto.src = payload.photoUrl;
+        }
         if (typeof payload.name === "string") userNameEl.textContent = payload.name ? `歡迎~ ${payload.name}` : userNameEl.textContent;
         return true;
       } catch (e) {
@@ -1749,6 +1754,9 @@ let firebaseApp, auth, db, functionsApp;
         // 將頭像設為按鈕：點擊開啟個人資訊與登出
         userPhotoEl.onclick = () => showProfileModal(user, role);
       }
+      if (homeHeroPhoto) {
+        if (user.photoURL) homeHeroPhoto.src = user.photoURL; else homeHeroPhoto.removeAttribute("src");
+      }
 
       // 確認或建立使用者文件（role 欄位）
       const userDocRef = doc(db, "users", user.uid);
@@ -1763,6 +1771,10 @@ let firebaseApp, auth, db, functionsApp;
         if (userPhotoEl) {
           const photoFromDoc = data.photoUrl || "";
           if (photoFromDoc) userPhotoEl.src = photoFromDoc; else if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
+        }
+        if (homeHeroPhoto) {
+          const photoFromDoc = data.photoUrl || "";
+          if (photoFromDoc) homeHeroPhoto.src = photoFromDoc; else if (user.photoURL) homeHeroPhoto.src = user.photoURL; else homeHeroPhoto.removeAttribute("src");
         }
       } else {
         await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
@@ -2031,6 +2043,10 @@ let firebaseApp, auth, db, functionsApp;
     manageSection.classList.toggle("hidden", tab !== "manage");
     featureSection.classList.toggle("hidden", tab !== "feature");
     settingsSection.classList.toggle("hidden", tab !== "settings");
+    // 首頁專用版面：切換 home-layout 類別
+    appView.classList.toggle("home-layout", tab === "home");
+    // 首頁專用大圖顯示切換
+    homeHero?.classList.toggle("hidden", tab !== "home");
     renderSubTabs(tab);
   }
 
