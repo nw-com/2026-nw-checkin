@@ -631,6 +631,13 @@ function renderSettingsAccounts() {
         { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})) },
         { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
         { key: "serviceCommunities", label: "服務社區", type: "multiselect", options: optionList(appState.communities) },
+        { key: "pagePermissions", label: "頁面權限", type: "multiselect", options: [
+          { value: "checkin", label: "打卡" },
+          { value: "leader", label: "幹部" },
+          { value: "manage", label: "管理" },
+          { value: "feature", label: "功能" },
+          { value: "settings", label: "設定" },
+        ] },
         { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
       ],
       onSubmit: (d) => { appState.accounts.push({ id: id(), ...d }); },
@@ -664,6 +671,13 @@ function renderSettingsAccounts() {
             { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})) },
             { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
             { key: "serviceCommunities", label: "服務社區", type: "multiselect", options: optionList(appState.communities) },
+            { key: "pagePermissions", label: "頁面權限", type: "multiselect", options: [
+              { value: "checkin", label: "打卡" },
+              { value: "leader", label: "幹部" },
+              { value: "manage", label: "管理" },
+              { value: "feature", label: "功能" },
+              { value: "settings", label: "設定" },
+            ] },
             { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
           ],
           initial: a,
@@ -784,6 +798,9 @@ async function ensureFirebase() {
       }
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
+      // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
+      applyPagePermissionsForUser(user);
+
         // 啟用定位顯示
         initGeolocation();
 
@@ -795,6 +812,8 @@ async function ensureFirebase() {
         loginView.classList.remove("hidden");
         userNameEl.textContent = "未登入";
         userPhotoEl.removeAttribute("src");
+        // 登出時恢復顯示所有分頁
+        resetPagePermissions();
       }
     });
   } catch (err) {
@@ -810,6 +829,32 @@ async function ensureFirebase() {
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   });
+
+  function applyPagePermissionsForUser(user) {
+    try {
+      const account = appState.accounts.find((a) => a.email && user.email && a.email.toLowerCase() === user.email.toLowerCase());
+      const allowed = new Set(["home"]);
+      if (account && Array.isArray(account.pagePermissions) && account.pagePermissions.length) {
+        account.pagePermissions.forEach((k) => allowed.add(k));
+        tabButtons.forEach((b) => {
+          const k = b.dataset.tab;
+          if (!allowed.has(k)) b.classList.add("hidden"); else b.classList.remove("hidden");
+        });
+        // 若目前選中的分頁不在允許清單，切回首頁
+        if (activeMainTab && !allowed.has(activeMainTab)) setActiveTab("home");
+      } else {
+        // 未設定權限時顯示所有分頁
+        tabButtons.forEach((b) => b.classList.remove("hidden"));
+      }
+    } catch (_) {
+      // 任意錯誤下，顯示所有分頁
+      tabButtons.forEach((b) => b.classList.remove("hidden"));
+    }
+  }
+
+  function resetPagePermissions() {
+    tabButtons.forEach((b) => b.classList.remove("hidden"));
+  }
 
   function setActiveTab(tab) {
     activeMainTab = tab;
