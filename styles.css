@@ -72,7 +72,7 @@ body {
 .app-header {
   position: fixed; top: 0; left: 0; right: 0; height: 8vh; min-height: 48px;
   display: flex; align-items: center; justify-content: space-between; padding: 0 14px;
-  background: #FF0000; color: #FFFFFF; border-bottom: none; z-index: 1000;
+  background: #FF0000; color: #374151; border-bottom: none; z-index: 1000;
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .header-icon { width: 28px; height: 28px; display: grid; place-items: center; }

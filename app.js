@@ -748,7 +748,7 @@ let fns = {
 
 async function ensureFirebase() {
   if (!isConfigReady()) return;
-  const [{ initializeApp }, { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword }, { getFirestore, doc, getDoc, setDoc, addDoc, collection, serverTimestamp }]
+  const [{ initializeApp }, { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword }, { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, serverTimestamp }]
     = await Promise.all([
       import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
       import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
@@ -768,6 +768,7 @@ async function ensureFirebase() {
   fns.setDoc = setDoc;
   fns.addDoc = addDoc;
   fns.collection = collection;
+  fns.getDocs = getDocs;
   fns.serverTimestamp = serverTimestamp;
 
   // 監聽登入狀態（容錯：若網路或授權網域設定不完整，改為顯示登入頁）
@@ -794,12 +795,15 @@ async function ensureFirebase() {
         const data = userSnap.data();
         role = data.role || role;
       } else {
-        await setDoc(userDocRef, { role, name: user.displayName || "使用者", createdAt: serverTimestamp() });
+        await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
       }
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
       applyPagePermissionsForUser(user);
+
+      // 從 Firestore 載入 users 清單，帶入帳號列表
+      await loadAccountsFromFirestore();
 
         // 啟用定位顯示
         initGeolocation();
@@ -829,6 +833,40 @@ async function ensureFirebase() {
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   });
+
+  async function loadAccountsFromFirestore() {
+    if (!db || !fns.getDocs || !fns.collection) return;
+    try {
+      const snap = await fns.getDocs(fns.collection(db, "users"));
+      const items = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        items.push({
+          id: docSnap.id,
+          name: d.name || "",
+          email: d.email || "",
+          role: d.role || "一般",
+          status: d.status || "在職",
+          title: d.title || "",
+          phone: d.phone || "",
+          licenses: Array.isArray(d.licenses) ? d.licenses : [],
+          companyId: d.companyId || null,
+          serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
+        });
+      });
+      items.forEach((it) => {
+        const idx = appState.accounts.findIndex((a) => a.id === it.id);
+        if (idx >= 0) {
+          appState.accounts[idx] = { ...appState.accounts[idx], ...it };
+        } else {
+          appState.accounts.push(it);
+        }
+      });
+      if (activeMainTab === "settings" && activeSubTab === "帳號") renderSettingsContent("帳號");
+    } catch (err) {
+      console.warn("載入 Firestore users 失敗：", err);
+    }
+  }
 
   function applyPagePermissionsForUser(user) {
     try {
