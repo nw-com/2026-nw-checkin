@@ -126,7 +126,7 @@ function id() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmit }) {
+function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmit, message }) {
   if (!modalRoot) return;
   modalRoot.classList.remove("hidden");
   modalRoot.innerHTML = "";
@@ -148,6 +148,15 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
 
   const body = document.createElement("div");
   body.className = "modal-body";
+  // 可選的訊息段落（用於刪除確認等情境）
+  if (message) {
+    const msg = document.createElement("div");
+    msg.className = "modal-message";
+    msg.textContent = message;
+    msg.style.marginBottom = "12px";
+    msg.style.color = "#b00020";
+    body.appendChild(msg);
+  }
 
   const inputs = [];
   fields.forEach((f) => {
@@ -293,6 +302,15 @@ function companyStats(companyId) {
   const leaderRoles = new Set(["管理層", "高階主管", "初階主管"]);
   const leaderCount = staff.filter((a) => leaderRoles.has(a.role)).length;
   return { communityCount, leaderCount, staffCount };
+}
+
+// 簡易刪除確認彈窗
+function confirmAction({ title = "確認刪除", text = "確定要刪除？此動作無法復原。", confirmText = "刪除" } = {}) {
+  return new Promise((resolve) => {
+    openModal({ title, fields: [], submitText: confirmText, message: text, onSubmit: () => { resolve(true); } });
+    const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { resolve(false); });
+  });
 }
 
 // 登入頁面「帳號申請」
@@ -476,14 +494,31 @@ function renderSettingsGeneral() {
             { key: "coords", label: "定位座標", type: "text" },
           ],
           initial: co,
-          onSubmit: (data) => {
-            co.name = data.name || co.name;
-            co.coords = data.coords || co.coords;
+          onSubmit: async (data) => {
+            try {
+              if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
+              await fns.setDoc(fns.doc(db, "companies", cid), { name: data.name || co.name, coords: data.coords || co.coords, updatedAt: fns.serverTimestamp() }, { merge: true });
+              co.name = data.name || co.name;
+              co.coords = data.coords || co.coords;
+            } catch (err) {
+              alert(`更新公司失敗：${err?.message || err}`);
+              return false;
+            }
           },
         });
       } else if (act === "del") {
-        appState.companies = appState.companies.filter((c) => c.id !== cid);
-        renderSettingsContent("一般");
+        (async () => {
+          const ok = await confirmAction({ title: "確認刪除公司", text: `確定要刪除公司「${co.name}」嗎？此動作無法復原。`, confirmText: "刪除" });
+          if (!ok) return;
+          try {
+            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            await fns.deleteDoc(fns.doc(db, "companies", cid));
+            appState.companies = appState.companies.filter((c) => c.id !== cid);
+            renderSettingsContent("一般");
+          } catch (err) {
+            alert(`刪除公司失敗：${err?.message || err}`);
+          }
+        })();
       }
     });
   });
@@ -515,10 +550,29 @@ function renderSettingsGeneral() {
       const r = appState.regions.find((x) => x.id === rid);
       if (!r) return;
       if (act === "edit") {
-        openModal({ title: "編輯區域", fields: [{ key: "name", label: "名稱", type: "text" }], initial: r, onSubmit: (d) => { r.name = d.name || r.name; } });
+        openModal({ title: "編輯區域", fields: [{ key: "name", label: "名稱", type: "text" }], initial: r, onSubmit: async (d) => {
+          try {
+            if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            await fns.setDoc(fns.doc(db, "regions", rid), { name: d.name || r.name, updatedAt: fns.serverTimestamp() }, { merge: true });
+            r.name = d.name || r.name;
+          } catch (err) {
+            alert(`更新區域失敗：${err?.message || err}`);
+            return false;
+          }
+        } });
       } else if (act === "del") {
-        appState.regions = appState.regions.filter((x) => x.id !== rid);
-        renderSettingsContent("一般");
+        (async () => {
+          const ok = await confirmAction({ title: "確認刪除區域", text: `確定要刪除區域「${r.name}」嗎？此動作無法復原。`, confirmText: "刪除" });
+          if (!ok) return;
+          try {
+            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            await fns.deleteDoc(fns.doc(db, "regions", rid));
+            appState.regions = appState.regions.filter((x) => x.id !== rid);
+            renderSettingsContent("一般");
+          } catch (err) {
+            alert(`刪除區域失敗：${err?.message || err}`);
+          }
+        })();
       }
     });
   });
@@ -550,10 +604,29 @@ function renderSettingsGeneral() {
       const l = appState.licenses.find((x) => x.id === lid);
       if (!l) return;
       if (act === "edit") {
-        openModal({ title: "編輯證照", fields: [{ key: "name", label: "名稱", type: "text" }], initial: l, onSubmit: (d) => { l.name = d.name || l.name; } });
+        openModal({ title: "編輯證照", fields: [{ key: "name", label: "名稱", type: "text" }], initial: l, onSubmit: async (d) => {
+          try {
+            if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            await fns.setDoc(fns.doc(db, "licenses", lid), { name: d.name || l.name, updatedAt: fns.serverTimestamp() }, { merge: true });
+            l.name = d.name || l.name;
+          } catch (err) {
+            alert(`更新證照失敗：${err?.message || err}`);
+            return false;
+          }
+        } });
       } else if (act === "del") {
-        appState.licenses = appState.licenses.filter((x) => x.id !== lid);
-        renderSettingsContent("一般");
+        (async () => {
+          const ok = await confirmAction({ title: "確認刪除證照", text: `確定要刪除證照「${l.name}」嗎？此動作無法復原。`, confirmText: "刪除" });
+          if (!ok) return;
+          try {
+            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            await fns.deleteDoc(fns.doc(db, "licenses", lid));
+            appState.licenses = appState.licenses.filter((x) => x.id !== lid);
+            renderSettingsContent("一般");
+          } catch (err) {
+            alert(`刪除證照失敗：${err?.message || err}`);
+          }
+        })();
       }
     });
   });
@@ -623,11 +696,39 @@ function renderSettingsCommunities() {
             { key: "coords", label: "定位座標", type: "text" },
           ],
           initial: item,
-          onSubmit: (d) => { Object.assign(item, d); },
+          onSubmit: async (d) => {
+            try {
+              if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
+              const payload = {
+                code: d.code ?? item.code ?? "",
+                name: d.name ?? item.name ?? "",
+                households: d.households ?? item.households ?? null,
+                regionId: d.regionId ?? item.regionId ?? null,
+                companyId: d.companyId ?? item.companyId ?? null,
+                coords: d.coords ?? item.coords ?? "",
+                updatedAt: fns.serverTimestamp(),
+              };
+              await fns.setDoc(fns.doc(db, "communities", cid), payload, { merge: true });
+              Object.assign(item, d);
+            } catch (err) {
+              alert(`更新社區失敗：${err?.message || err}`);
+              return false;
+            }
+          },
         });
       } else if (act === "del") {
-        appState.communities = appState.communities.filter((x) => x.id !== cid);
-        renderSettingsContent("社區");
+        (async () => {
+          const ok = await confirmAction({ title: "確認刪除社區", text: `確定要刪除社區「${item.name}」嗎？此動作無法復原。`, confirmText: "刪除" });
+          if (!ok) return;
+          try {
+            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            await fns.deleteDoc(fns.doc(db, "communities", cid));
+            appState.communities = appState.communities.filter((x) => x.id !== cid);
+            renderSettingsContent("社區");
+          } catch (err) {
+            alert(`刪除社區失敗：${err?.message || err}`);
+          }
+        })();
       }
     });
   });
@@ -805,11 +906,52 @@ function renderSettingsAccounts() {
             { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
           ],
           initial: a,
-          onSubmit: (d) => { Object.assign(a, d); },
+          onSubmit: async (d) => {
+            try {
+              if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
+              const payload = {
+                photoUrl: d.photoUrl ?? a.photoUrl ?? "",
+                name: d.name ?? a.name ?? "",
+                title: d.title ?? a.title ?? "",
+                email: d.email ?? a.email ?? "",
+                phone: d.phone ?? a.phone ?? "",
+                // 密碼相關欄位僅作顯示用途
+                password: d.password ?? a.password ?? "",
+                passwordConfirm: d.passwordConfirm ?? a.passwordConfirm ?? "",
+                emergencyName: d.emergencyName ?? a.emergencyName ?? "",
+                emergencyRelation: d.emergencyRelation ?? a.emergencyRelation ?? "",
+                emergencyPhone: d.emergencyPhone ?? a.emergencyPhone ?? "",
+                bloodType: d.bloodType ?? a.bloodType ?? "",
+                birthdate: d.birthdate ?? a.birthdate ?? "",
+                licenses: Array.isArray(d.licenses) ? d.licenses : (Array.isArray(a.licenses) ? a.licenses : []),
+                role: d.role ?? a.role ?? "一般",
+                companyId: d.companyId ?? a.companyId ?? null,
+                serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : (Array.isArray(a.serviceCommunities) ? a.serviceCommunities : []),
+                pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : (Array.isArray(a.pagePermissions) ? a.pagePermissions : []),
+                status: d.status ?? a.status ?? "在職",
+                updatedAt: fns.serverTimestamp(),
+              };
+              await fns.setDoc(fns.doc(db, "users", aid), payload, { merge: true });
+              Object.assign(a, d);
+            } catch (err) {
+              alert(`更新帳號失敗：${err?.message || err}`);
+              return false;
+            }
+          },
         });
       } else if (act === "del") {
-        appState.accounts = appState.accounts.filter((x) => x.id !== aid);
-        renderSettingsContent("帳號");
+        (async () => {
+          const ok = await confirmAction({ title: "確認刪除帳號", text: `確定要刪除帳號「${a.name || a.email || aid}」嗎？此動作無法復原。`, confirmText: "刪除" });
+          if (!ok) return;
+          try {
+            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            await fns.deleteDoc(fns.doc(db, "users", aid));
+            appState.accounts = appState.accounts.filter((x) => x.id !== aid);
+            renderSettingsContent("帳號");
+          } catch (err) {
+            alert(`刪除帳號失敗：${err?.message || err}`);
+          }
+        })();
       }
     });
   });
@@ -828,8 +970,12 @@ function renderSettingsAccounts() {
         appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
         renderSettingsContent("帳號");
       } else if (act === "del") {
-        appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
-        renderSettingsContent("帳號");
+        (async () => {
+          const ok = await confirmAction({ title: "確認刪除待審核帳號", text: `確定要刪除此待審核帳號「${item.name || item.email || pid}」嗎？`, confirmText: "刪除" });
+          if (!ok) return;
+          appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
+          renderSettingsContent("帳號");
+        })();
       }
     });
   });
@@ -867,12 +1013,14 @@ let fns = {
   setDoc: null,
   addDoc: null,
   collection: null,
+  deleteDoc: null,
+  updateDoc: null,
   serverTimestamp: null,
 };
 
 async function ensureFirebase() {
   if (!isConfigReady()) return;
-  const [{ initializeApp }, { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword }, { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, serverTimestamp }]
+  const [{ initializeApp }, { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword }, { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp }]
     = await Promise.all([
       import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
       import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
@@ -893,6 +1041,8 @@ async function ensureFirebase() {
   fns.addDoc = addDoc;
   fns.collection = collection;
   fns.getDocs = getDocs;
+  fns.deleteDoc = deleteDoc;
+  fns.updateDoc = updateDoc;
   fns.serverTimestamp = serverTimestamp;
 
   // 監聽登入狀態（容錯：若網路或授權網域設定不完整，改為顯示登入頁）
