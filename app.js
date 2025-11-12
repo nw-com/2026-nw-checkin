@@ -493,16 +493,20 @@ function showProfileModal(user, role) {
     name: user.displayName || "",
     email: user.email || "",
     role: role || "一般",
+    phone: "",
   };
   openModal({
     title: "個人資訊",
     submitText: "儲存",
     initial,
     fields: [
-      { key: "photoUrl", label: "大頭照", type: "file" },
+      { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})), readonly: true },
+      { key: "photoUrl", label: "大頭照", type: "file", readonly: true },
       { key: "name", label: "姓名", type: "text", readonly: true },
       { key: "email", label: "電子郵件", type: "email", readonly: true },
-      { key: "role", label: "角色", type: "text", readonly: true },
+      { key: "phone", label: "手機號碼", type: "text", readonly: true },
+      { key: "monthlyPoints", label: "本月計點", type: "text", readonly: true },
+      { key: "notifications", label: "通知", type: "text", readonly: true },
     ],
     onSubmit: async (data) => {
       try {
@@ -510,18 +514,45 @@ function showProfileModal(user, role) {
         if (!user?.uid) throw new Error("使用者未登入");
         const payload = {};
         if (typeof data.photoUrl === "string") payload.photoUrl = data.photoUrl;
+        if (typeof data.name === "string") payload.name = data.name;
+        if (typeof data.email === "string") payload.email = data.email;
+        if (typeof data.phone === "string") payload.phone = data.phone;
+        // 角色僅限系統管理員可變更
+        if (appState.currentUserRole === "系統管理員" && typeof data.role === "string") payload.role = data.role;
         if (Object.keys(payload).length === 0) return true;
         if (typeof fns.serverTimestamp === "function") payload.updatedAt = fns.serverTimestamp();
         await fns.setDoc(fns.doc(db, "users", user.uid), payload, { merge: true });
         if (typeof payload.photoUrl === "string" && userPhotoEl) userPhotoEl.src = payload.photoUrl;
+        if (typeof payload.name === "string") userNameEl.textContent = payload.name || userNameEl.textContent;
         return true;
       } catch (e) {
         alert("儲存個人照片失敗：" + (e?.message || e));
         return false;
       }
     },
-    afterRender: async ({ header, body }) => {
+    afterRender: async ({ header, body, footer, inputs }) => {
       try {
+        // 置中布局
+        body.style.textAlign = "center";
+        Array.from(body.querySelectorAll(".form-row")).forEach((row) => {
+          row.style.display = "flex";
+          row.style.flexDirection = "column";
+          row.style.alignItems = "center";
+        });
+
+        // 初始狀態：唯讀，停用儲存
+        const btnSubmit = footer.querySelector(".btn-primary");
+        if (btnSubmit) btnSubmit.disabled = true;
+
+        // 加入「編輯」按鈕（位於標題右側）
+        const btnEdit = document.createElement("button");
+        btnEdit.className = "btn";
+        btnEdit.textContent = "編輯";
+        attachPressInteractions(btnEdit);
+        header.insertBefore(btnEdit, header.lastChild); // 放在關閉按鈕前
+
+        let editing = false;
+
         // 以 Firestore 使用者文件覆蓋照片與基本資訊
         if (db && fns.doc && fns.getDoc && user?.uid) {
           const ref = fns.doc(db, "users", user.uid);
@@ -537,18 +568,20 @@ function showProfileModal(user, role) {
                 let preview = row.querySelector("img");
                 if (!preview) {
                   preview = document.createElement("img");
-                  preview.style.width = "60px";
-                  preview.style.height = "60px";
+                  preview.style.width = "120px";
+                  preview.style.height = "120px";
                   preview.style.borderRadius = "50%";
                   preview.style.objectFit = "cover";
-                  preview.style.marginTop = "6px";
-                  preview.style.cursor = "pointer";
+                  preview.style.margin = "12px auto 0";
+                  preview.style.cursor = "default";
                   row.appendChild(preview);
                 }
                 if (photo) preview.src = photo;
                 if (input) {
                   input.style.display = "none";
-                  preview.addEventListener("click", () => input.click());
+                  preview.addEventListener("click", () => {
+                    if (editing) input.click();
+                  });
                 }
               }
             }
@@ -556,14 +589,74 @@ function showProfileModal(user, role) {
             const nameInput = body.querySelector('[data-key="name"]');
             const emailInput = body.querySelector('[data-key="email"]');
             const roleInput = body.querySelector('[data-key="role"]');
+            const phoneInput = body.querySelector('[data-key="phone"]');
+            const monthlyInput = body.querySelector('[data-key="monthlyPoints"]');
+            const notifInput = body.querySelector('[data-key="notifications"]');
             if (nameInput) nameInput.value = d.name || user.displayName || nameInput.value || "";
             if (emailInput) emailInput.value = d.email || user.email || emailInput.value || "";
+            if (phoneInput) phoneInput.value = d.phone || phoneInput.value || "";
             if (roleInput) roleInput.value = d.role || roleInput.value || (typeof role === "string" ? role : "一般");
+
+            // 計算本月計點（checkins 集合當月筆數）
+            try {
+              if (fns.getDocs && fns.collection) {
+                const snap2 = await fns.getDocs(fns.collection(db, "checkins"));
+                let count = 0;
+                const now = new Date();
+                const ym = `${now.getFullYear()}-${now.getMonth()+1}`;
+                snap2.forEach((docSnap) => {
+                  const x = docSnap.data() || {};
+                  if (x.uid !== user.uid) return;
+                  const ts = x.createdAt;
+                  if (ts && typeof ts.toDate === "function") {
+                    const d2 = ts.toDate();
+                    const ym2 = `${d2.getFullYear()}-${d2.getMonth()+1}`;
+                    if (ym2 === ym) count++;
+                  }
+                });
+                if (monthlyInput) monthlyInput.value = String(count);
+              }
+            } catch {}
+
+            // 通知顯示（若有 users 欄位）
+            try {
+              if (notifInput) {
+                const v = d.notifications ?? d.notificationsEnabled;
+                if (typeof v === "boolean") notifInput.value = v ? "已開啟" : "未開啟";
+                else if (typeof v === "string") notifInput.value = v;
+                else notifInput.value = "未設定";
+              }
+            } catch {}
           }
         }
+
+        // 切換編輯狀態：啟用/停用可編輯欄位與儲存按鈕
+        const editableKeys = new Set(["photoUrl", "name", "email", "phone", "role"]);
+        const toggleEditing = (to) => {
+          editing = to;
+          inputs.forEach((el) => {
+            const k = el.dataset.key;
+            if (!editableKeys.has(k)) return; // 非可編輯欄位維持唯讀
+            if (k === "role" && appState.currentUserRole !== "系統管理員") {
+              // 非系統管理員：角色仍維持唯讀
+              el.disabled = true;
+              return;
+            }
+            el.disabled = !editing;
+          });
+          // 影像預覽游標提示
+          const preview = body.querySelector('[data-key="photoUrl"]')?.parentElement?.querySelector('img');
+          if (preview) preview.style.cursor = editing ? "pointer" : "default";
+          if (btnSubmit) btnSubmit.disabled = !editing;
+          btnEdit.textContent = editing ? "完成編輯" : "編輯";
+        };
+
+        // 初始為唯讀
+        toggleEditing(false);
+        btnEdit.addEventListener("click", () => toggleEditing(!editing));
       } catch {}
 
-      // 在標頭加入登出按鈕
+      // 在視窗最下方（footer）加入登出按鈕
       try {
         const btnLogout = document.createElement("button");
         btnLogout.className = "btn";
@@ -581,7 +674,7 @@ function showProfileModal(user, role) {
             alert("登出失敗：" + (e?.message || e));
           }
         });
-        header.appendChild(btnLogout);
+        footer.appendChild(btnLogout);
       } catch {}
     },
   });
@@ -867,7 +960,7 @@ function renderSettingsCommunities() {
     openModal({
       title: "新增社區",
       fields: [
-        { key: "code", label: "社區編號(原代號)", type: "text" },
+        { key: "code", label: "社區編號", type: "text" },
         { key: "name", label: "社區名稱", type: "text" },
         { key: "address", label: "地址", type: "text" },
         { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
@@ -889,6 +982,9 @@ function renderSettingsCommunities() {
         const addrInput = body.querySelector('[data-key="address"]');
         const coordsInput = body.querySelector('[data-key="coords"]');
         const regionSelect = body.querySelector('[data-key="regionId"]');
+        const radiusInput = body.querySelector('[data-key="radiusMeters"]');
+        // 預設 50 公尺（若尚未填值）
+        if (radiusInput && (!radiusInput.value || radiusInput.value.trim() === "")) radiusInput.value = "50";
         // 依地址自動帶入區域與座標
         addrInput?.addEventListener("change", async () => {
           const v = addrInput.value?.trim(); if (!v) return;
@@ -909,12 +1005,12 @@ function renderSettingsCommunities() {
           attachPressInteractions(btn);
           btn.style.marginTop = "6px";
           btn.addEventListener("click", async () => {
-            const result = await openMapPicker({ initialAddress: addrInput.value, initialCoords: coordsInput.value, initialRadius: Number(body.querySelector('[data-key="radiusMeters"]').value) || 100 });
+            const result = await openMapPicker({ initialAddress: addrInput.value, initialCoords: coordsInput.value, initialRadius: Number(body.querySelector('[data-key="radiusMeters"]').value) || 50 });
             if (result) {
               addrInput.value = result.address || addrInput.value;
               coordsInput.value = result.coords || coordsInput.value;
-              const radiusInput = body.querySelector('[data-key="radiusMeters"]');
-              if (radiusInput && result.radiusMeters != null) radiusInput.value = String(result.radiusMeters);
+              const radiusInput2 = body.querySelector('[data-key="radiusMeters"]');
+              if (radiusInput2 && result.radiusMeters != null) radiusInput2.value = String(result.radiusMeters);
               // 反向地理編碼取得區域
               try {
                 const [lat, lng] = (result.coords || "").split(",").map((s) => parseFloat(s.trim()));
@@ -943,7 +1039,7 @@ function renderSettingsCommunities() {
         openModal({
           title: "編輯社區",
           fields: [
-            { key: "code", label: "社區編號(原代號)", type: "text" },
+            { key: "code", label: "社區編號", type: "text" },
             { key: "name", label: "社區名稱", type: "text" },
             { key: "address", label: "地址", type: "text" },
             { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
@@ -974,6 +1070,9 @@ function renderSettingsCommunities() {
             const addrInput = body.querySelector('[data-key="address"]');
             const coordsInput = body.querySelector('[data-key="coords"]');
             const regionSelect = body.querySelector('[data-key="regionId"]');
+            const radiusInput = body.querySelector('[data-key="radiusMeters"]');
+            // 若半徑未填值，預設為 50 公尺
+            if (radiusInput && (!radiusInput.value || radiusInput.value.trim() === "")) radiusInput.value = "50";
             addrInput?.addEventListener("change", async () => {
               const v = addrInput.value?.trim(); if (!v) return;
               try {
@@ -1041,8 +1140,8 @@ function renderSettingsAccounts() {
       <td>${a.title || ""}</td>
       <td>${a.email || ""}</td>
       <td>${a.phone || ""}</td>
-      <td>${a.password || ""}</td>
-      <td>${a.passwordConfirm || ""}</td>
+      <td class="cell-password" contenteditable="true" title="雙擊編輯，Enter 或失焦儲存">${a.password || ""}</td>
+      <td class="cell-password-confirm" contenteditable="true" title="雙擊編輯，Enter 或失焦儲存">${a.passwordConfirm || ""}</td>
       <td>${a.emergencyName || ""}</td>
       <td>${a.emergencyRelation || ""}</td>
       <td>${a.emergencyPhone || ""}</td>
@@ -1137,15 +1236,39 @@ function renderSettingsAccounts() {
             return false;
           }
           if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
+
+          // 驗證密碼一致（若有提供）
+          if (d.password && d.passwordConfirm && d.password !== d.passwordConfirm) {
+            alert("預設密碼與確認密碼不一致。");
+            return false;
+          }
+
+          // 嘗試透過雲端函式建立 Auth 使用者（不影響目前登入的管理員）
+          let createdUid = null;
+          if (fns.functions && fns.httpsCallable && d.email && d.password) {
+            try {
+              const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
+              const res = await createUser({
+                email: d.email,
+                password: d.password,
+                name: d.name || "",
+                photoUrl: d.photoUrl || "",
+              });
+              createdUid = res?.data?.uid || null;
+            } catch (err) {
+              console.warn("adminCreateUser 失敗", err);
+              alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+            }
+          }
+
           const payload = {
             photoUrl: d.photoUrl || "",
             name: d.name || "",
             title: d.title || "",
             email: d.email || "",
             phone: d.phone || "",
-            // 密碼僅作顯示用，不會在此自動建立 Auth 帳號
-            password: d.password || "",
-            passwordConfirm: d.passwordConfirm || "",
+            // 不將密碼寫入 Firestore（避免明文儲存）
+            uid: createdUid || null,
             emergencyName: d.emergencyName || "",
             emergencyRelation: d.emergencyRelation || "",
             emergencyPhone: d.emergencyPhone || "",
@@ -1160,7 +1283,8 @@ function renderSettingsAccounts() {
             createdAt: fns.serverTimestamp(),
           };
           const docRef = await fns.addDoc(fns.collection(db, "users"), payload);
-          appState.accounts.push({ id: docRef.id, ...d });
+          // 僅在前端狀態保留密碼欄位作為表格顯示，不寫入 Firestore
+          appState.accounts.push({ id: docRef.id, ...d, uid: createdUid || null });
         } catch (err) {
           alert(`儲存帳號失敗：${err?.message || err}`);
           return false;
@@ -1213,15 +1337,41 @@ function renderSettingsAccounts() {
                 return false;
               }
               if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
+
+              // 若提供新密碼且確認一致，呼叫雲端函式更新 Auth 密碼
+              if (d.password && d.passwordConfirm) {
+                if (d.password !== d.passwordConfirm) {
+                  alert("新密碼與確認密碼不一致。");
+                  return false;
+                }
+                if (fns.functions && fns.httpsCallable) {
+                  try {
+                    const updatePwd = fns.httpsCallable(fns.functions, "adminUpdateUserPassword");
+                    await updatePwd({
+                      uid: a.uid || null,
+                      email: a.email || d.email || null,
+                      newPassword: d.password,
+                    });
+                    alert("已更新登入頁面的密碼。");
+                  } catch (err) {
+                    console.warn("adminUpdateUserPassword 失敗", err);
+                    alert("更新登入密碼失敗：請稍後重試或確認雲端函式部署與權限設定。");
+                    return false;
+                  }
+                } else {
+                  alert("尚未設定雲端函式，無法更新登入密碼。");
+                  return false;
+                }
+              }
+
               const payload = {
                 photoUrl: d.photoUrl ?? a.photoUrl ?? "",
                 name: d.name ?? a.name ?? "",
                 title: d.title ?? a.title ?? "",
                 email: d.email ?? a.email ?? "",
                 phone: d.phone ?? a.phone ?? "",
-                // 密碼相關欄位僅作顯示用途
-                password: d.password ?? a.password ?? "",
-                passwordConfirm: d.passwordConfirm ?? a.passwordConfirm ?? "",
+                // 不將密碼寫入 Firestore（避免明文儲存）
+                uid: a.uid || null,
                 emergencyName: d.emergencyName ?? a.emergencyName ?? "",
                 emergencyRelation: d.emergencyRelation ?? a.emergencyRelation ?? "",
                 emergencyPhone: d.emergencyPhone ?? a.emergencyPhone ?? "",
@@ -1236,7 +1386,8 @@ function renderSettingsAccounts() {
                 updatedAt: fns.serverTimestamp(),
               };
               await fns.setDoc(fns.doc(db, "users", aid), payload, { merge: true });
-              Object.assign(a, d);
+              // 在前端狀態更新顯示資料（保留密碼欄位僅供表格顯示，不寫入 Firestore）
+              Object.assign(a, { ...d, uid: payload.uid });
             } catch (err) {
               alert(`更新帳號失敗：${err?.message || err}`);
               return false;
@@ -1261,6 +1412,53 @@ function renderSettingsAccounts() {
           }
         })();
       }
+    });
+
+    // 內嵌密碼編輯：在失焦或按 Enter 觸發更新
+    const pwdCell = tr.querySelector(".cell-password");
+    const confirmCell = tr.querySelector(".cell-password-confirm");
+    [pwdCell, confirmCell].forEach((cell) => {
+      if (!cell) return;
+      cell.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          cell.blur();
+        }
+      });
+      cell.addEventListener("blur", async () => {
+        const a = appState.accounts.find((x) => x.id === aid);
+        if (!a) return;
+        const newPwd = (pwdCell?.textContent || "").trim();
+        const newConfirm = (confirmCell?.textContent || "").trim();
+        // 若兩者皆空，不做事
+        if (!newPwd && !newConfirm) return;
+        if (newPwd !== newConfirm) {
+          alert("新密碼與確認密碼不一致。");
+          return;
+        }
+        if (appState.currentUserRole !== "系統管理員") {
+          alert("權限不足：只有系統管理員可以更新密碼。");
+          return;
+        }
+        if (!(fns.functions && fns.httpsCallable)) {
+          alert("尚未設定雲端函式，無法更新登入密碼。");
+          return;
+        }
+        try {
+          const updatePwd = fns.httpsCallable(fns.functions, "adminUpdateUserPassword");
+          await updatePwd({
+            uid: a.uid || null,
+            email: a.email || null,
+            newPassword: newPwd,
+          });
+          alert("已更新登入頁面的密碼。");
+          // 更新前端表格顯示值
+          a.password = newPwd;
+          a.passwordConfirm = newConfirm;
+        } catch (err) {
+          alert(`更新登入密碼失敗：${err?.message || err}`);
+        }
+      });
     });
   });
 
@@ -1311,7 +1509,7 @@ if (!isConfigReady()) {
 }
 
 // ===== 4) 動態載入 Firebase 模組並初始化 =====
-let firebaseApp, auth, db;
+let firebaseApp, auth, db, functionsApp;
 // 將常用 Firebase 函式存到外層，讓按鈕事件可即時呼叫
 let fns = {
   signInWithEmailAndPassword: null,
@@ -1325,21 +1523,30 @@ let fns = {
   deleteDoc: null,
   updateDoc: null,
   serverTimestamp: null,
+  // Firebase Functions（雲端函式）
+  functions: null,
+  httpsCallable: null,
 };
 
 async function ensureFirebase() {
   if (!isConfigReady()) return;
-  const [{ initializeApp }, { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword }, { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp }]
-    = await Promise.all([
-      import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
-      import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
-      import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js"),
-    ]);
+  const [
+    { initializeApp },
+    { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword },
+    { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp },
+    { getFunctions, httpsCallable },
+  ] = await Promise.all([
+    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
+    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
+    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js"),
+    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js"),
+  ]);
 
   // 初始化 Firebase
   firebaseApp = initializeApp(FIREBASE_CONFIG);
   auth = getAuth(firebaseApp);
   db = getFirestore(firebaseApp);
+  functionsApp = getFunctions(firebaseApp);
 
   // 將函式指派到外層供事件使用
   fns.signInWithEmailAndPassword = signInWithEmailAndPassword;
@@ -1354,6 +1561,9 @@ async function ensureFirebase() {
   fns.deleteDoc = deleteDoc;
   fns.updateDoc = updateDoc;
   fns.serverTimestamp = serverTimestamp;
+  // 雲端函式
+  fns.functions = functionsApp;
+  fns.httpsCallable = httpsCallable;
 
   // 監聽登入狀態（容錯：若網路或授權網域設定不完整，改為顯示登入頁）
   try {
