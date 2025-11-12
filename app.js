@@ -13,6 +13,9 @@ window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
   measurementId: "G-G6M6NGBC03",
 };
 
+// Google Maps API Key（來自使用者提供）
+const GOOGLE_MAPS_API_KEY = "AIzaSyAzhLdWtycJgfz8UsXWlji63DkXpA4kmyY";
+
 // 若您需要使用 Google Maps，請在此填入 API 金鑰（選填，用於定位或地圖顯示）
 // export const GOOGLE_MAPS_API_KEY = "YOUR_GOOGLE_MAPS_API_KEY";
 
@@ -128,7 +131,7 @@ function id() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmit, message }) {
+function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmit, message, afterRender }) {
   if (!modalRoot) return;
   modalRoot.classList.remove("hidden");
   modalRoot.innerHTML = "";
@@ -207,18 +210,44 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
     input.dataset.key = f.key;
     row.appendChild(label);
     row.appendChild(input);
-    // 檔案欄位預覽（唯讀顯示頭像）
-    if (f.type === "file" && initial && initial[f.key]) {
-      const preview = document.createElement("img");
-      preview.src = initial[f.key];
-      preview.alt = f.label;
-      preview.style.width = "60px";
-      preview.style.height = "60px";
-      preview.style.borderRadius = "50%";
-      preview.style.objectFit = "cover";
-      preview.style.marginTop = "6px";
-      row.appendChild(preview);
+    // 檔案欄位預覽：初始值與即時選取預覽
+    if (f.type === "file") {
+      let preview = null;
+      if (initial && initial[f.key]) {
+        preview = document.createElement("img");
+        preview.src = initial[f.key];
+        preview.alt = f.label;
+        preview.style.width = "60px";
+        preview.style.height = "60px";
+        preview.style.borderRadius = "50%";
+        preview.style.objectFit = "cover";
+        preview.style.marginTop = "6px";
+        row.appendChild(preview);
+      }
       if (f.readonly) input.disabled = true;
+      // 即時預覽：使用者選擇檔案後，顯示預覽圖片
+      input.addEventListener("change", async () => {
+        const file = input.files?.[0];
+        if (file) {
+          const url = await fileToDataUrl(file);
+          if (!preview) {
+            preview = document.createElement("img");
+            preview.alt = f.label;
+            preview.style.width = "60px";
+            preview.style.height = "60px";
+            preview.style.borderRadius = "50%";
+            preview.style.objectFit = "cover";
+            preview.style.marginTop = "6px";
+            row.appendChild(preview);
+          }
+          preview.src = url;
+        } else {
+          // 沒選檔案時，回退到初始預覽或清除
+          if (preview) {
+            if (initial && initial[f.key]) preview.src = initial[f.key]; else preview.remove();
+          }
+        }
+      });
     }
     body.appendChild(row);
     inputs.push(input);
@@ -272,6 +301,11 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
   modal.appendChild(body);
   modal.appendChild(footer);
   modalRoot.appendChild(modal);
+
+  // 允許外部在渲染完成後插入額外 UI 或事件（例如地圖編輯按鈕）
+  if (typeof afterRender === "function") {
+    try { afterRender({ modal, header, body, footer, inputs }); } catch (e) { console.error("afterRender error", e); }
+  }
 }
 
 function closeModal() {
@@ -295,6 +329,115 @@ function optionList(items, labelKey = "name") {
 function getRoles() {
   if (typeof window !== "undefined" && window.Roles && Array.isArray(window.Roles)) return window.Roles;
   return ["系統管理員", "管理層", "高階主管", "初階主管", "行政", "一般", "勤務"];
+}
+
+// Google Maps：載入與地理編碼工具
+async function ensureGoogleMaps() {
+  if (window.google && window.google.maps) return window.google.maps;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`;
+    s.async = true;
+    s.defer = true;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+  return window.google.maps;
+}
+
+function regionIdFromAddressComponents(components = []) {
+  const names = components.map((c) => c.long_name);
+  const lookup = [];
+  components.forEach((c) => {
+    const t = (c.types || [])[0];
+    if (["locality", "administrative_area_level_3", "administrative_area_level_2", "administrative_area_level_1"].includes(t)) {
+      lookup.push(c.long_name);
+    }
+  });
+  const candidates = [...lookup, ...names].filter(Boolean);
+  for (const r of appState.regions) {
+    if (candidates.some((n) => (n || "").includes(r.name))) return r.id;
+  }
+  return null;
+}
+
+async function geocodeAddress(address) {
+  const maps = await ensureGoogleMaps();
+  const geocoder = new maps.Geocoder();
+  return new Promise((resolve, reject) => {
+    geocoder.geocode({ address }, (results, status) => {
+      if (status === "OK" && results?.[0]) resolve(results[0]); else reject(new Error(`Geocode failed: ${status}`));
+    });
+  });
+}
+
+async function reverseGeocode(lat, lng) {
+  const maps = await ensureGoogleMaps();
+  const geocoder = new maps.Geocoder();
+  return new Promise((resolve, reject) => {
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      if (status === "OK" && results?.[0]) resolve(results[0]); else reject(new Error(`Reverse geocode failed: ${status}`));
+    });
+  });
+}
+
+function openMapPicker({ initialAddress = "", initialCoords = "", initialRadius = 100 }) {
+  return new Promise(async (resolve) => {
+    await ensureGoogleMaps();
+    const start = (() => {
+      if (initialCoords) {
+        const [latStr, lngStr] = String(initialCoords).split(",").map((s) => s.trim());
+        const lat = parseFloat(latStr); const lng = parseFloat(lngStr);
+        if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+      }
+      return { lat: 25.041, lng: 121.532 };
+    })();
+    const fields = [
+      { key: "address", label: "地址", type: "text", placeholder: "輸入地址以定位" },
+      { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
+      { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number", placeholder: "100" },
+    ];
+    const initial = { address: initialAddress, coords: `${start.lat},${start.lng}`, radiusMeters: initialRadius };
+    openModal({
+      title: "地圖編輯",
+      fields,
+      initial,
+      submitText: "套用",
+      onSubmit: async (data) => resolve(data),
+      afterRender: async ({ body }) => {
+        const maps = await ensureGoogleMaps();
+        const mapBox = document.createElement("div");
+        mapBox.style.width = "100%";
+        mapBox.style.height = "320px";
+        mapBox.style.marginTop = "8px";
+        body.appendChild(mapBox);
+        const map = new maps.Map(mapBox, { center: start, zoom: 16 });
+        const marker = new maps.Marker({ position: start, map, draggable: true });
+        let circle = new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: start, radius: initial.radiusMeters || 100 });
+        const addrInput = body.querySelector('[data-key="address"]');
+        const coordsInput = body.querySelector('[data-key="coords"]');
+        const radiusInput = body.querySelector('[data-key="radiusMeters"]');
+        const updateFromLatLng = async (lat, lng) => {
+          coordsInput.value = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+          marker.setPosition({ lat, lng });
+          circle.setCenter({ lat, lng });
+          try { const res = await reverseGeocode(lat, lng); addrInput.value = res.formatted_address || addrInput.value; } catch {}
+        };
+        marker.addListener("dragend", (ev) => { const p = ev.latLng; updateFromLatLng(p.lat(), p.lng()); });
+        radiusInput.addEventListener("input", () => { const r = Number(radiusInput.value) || 100; circle.setRadius(r); });
+        addrInput.addEventListener("change", async () => {
+          const v = addrInput.value?.trim(); if (!v) return;
+          try {
+            const res = await geocodeAddress(v);
+            const loc = res.geometry.location; const pos = { lat: loc.lat(), lng: loc.lng() };
+            map.setCenter(pos); marker.setPosition(pos); circle.setCenter(pos);
+            coordsInput.value = `${pos.lat.toFixed(6)},${pos.lng.toFixed(6)}`;
+          } catch {}
+        });
+      },
+    });
+  });
 }
 
 function companyStats(companyId) {
@@ -350,31 +493,96 @@ function showProfileModal(user, role) {
     name: user.displayName || "",
     email: user.email || "",
     role: role || "一般",
-    uid: user.uid || "",
   };
   openModal({
     title: "個人資訊",
-    submitText: "登出",
+    submitText: "儲存",
     initial,
     fields: [
-      { key: "photoUrl", label: "大頭照", type: "file", readonly: true },
+      { key: "photoUrl", label: "大頭照", type: "file" },
       { key: "name", label: "姓名", type: "text", readonly: true },
       { key: "email", label: "電子郵件", type: "email", readonly: true },
       { key: "role", label: "角色", type: "text", readonly: true },
-      { key: "uid", label: "UID", type: "text", readonly: true },
     ],
-    onSubmit: async () => {
+    onSubmit: async (data) => {
       try {
-        if (typeof fns.signOut === "function" && auth) {
-          await fns.signOut(auth);
-        } else {
-          throw new Error("Auth 未初始化或 signOut 不可用");
-        }
+        if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
+        if (!user?.uid) throw new Error("使用者未登入");
+        const payload = {};
+        if (typeof data.photoUrl === "string") payload.photoUrl = data.photoUrl;
+        if (Object.keys(payload).length === 0) return true;
+        if (typeof fns.serverTimestamp === "function") payload.updatedAt = fns.serverTimestamp();
+        await fns.setDoc(fns.doc(db, "users", user.uid), payload, { merge: true });
+        if (typeof payload.photoUrl === "string" && userPhotoEl) userPhotoEl.src = payload.photoUrl;
         return true;
       } catch (e) {
-        alert("登出失敗：" + (e?.message || e));
+        alert("儲存個人照片失敗：" + (e?.message || e));
         return false;
       }
+    },
+    afterRender: async ({ header, body }) => {
+      try {
+        // 以 Firestore 使用者文件覆蓋照片與基本資訊
+        if (db && fns.doc && fns.getDoc && user?.uid) {
+          const ref = fns.doc(db, "users", user.uid);
+          const snap = await fns.getDoc(ref);
+          if (snap.exists()) {
+            const d = snap.data() || {};
+            // 照片預覽與點擊重新上傳
+            {
+              const photo = d.photoUrl || initial.photoUrl;
+              const input = body.querySelector('[data-key="photoUrl"]');
+              const row = input?.parentElement;
+              if (row) {
+                let preview = row.querySelector("img");
+                if (!preview) {
+                  preview = document.createElement("img");
+                  preview.style.width = "60px";
+                  preview.style.height = "60px";
+                  preview.style.borderRadius = "50%";
+                  preview.style.objectFit = "cover";
+                  preview.style.marginTop = "6px";
+                  preview.style.cursor = "pointer";
+                  row.appendChild(preview);
+                }
+                if (photo) preview.src = photo;
+                if (input) {
+                  input.style.display = "none";
+                  preview.addEventListener("click", () => input.click());
+                }
+              }
+            }
+            // 姓名、Email、角色 顯示
+            const nameInput = body.querySelector('[data-key="name"]');
+            const emailInput = body.querySelector('[data-key="email"]');
+            const roleInput = body.querySelector('[data-key="role"]');
+            if (nameInput) nameInput.value = d.name || user.displayName || nameInput.value || "";
+            if (emailInput) emailInput.value = d.email || user.email || emailInput.value || "";
+            if (roleInput) roleInput.value = d.role || roleInput.value || (typeof role === "string" ? role : "一般");
+          }
+        }
+      } catch {}
+
+      // 在標頭加入登出按鈕
+      try {
+        const btnLogout = document.createElement("button");
+        btnLogout.className = "btn";
+        btnLogout.textContent = "登出";
+        attachPressInteractions(btnLogout);
+        btnLogout.addEventListener("click", async () => {
+          try {
+            if (typeof fns.signOut === "function" && auth) {
+              await fns.signOut(auth);
+              closeModal();
+            } else {
+              throw new Error("Auth 未初始化或 signOut 不可用");
+            }
+          } catch (e) {
+            alert("登出失敗：" + (e?.message || e));
+          }
+        });
+        header.appendChild(btnLogout);
+      } catch {}
     },
   });
 }
@@ -639,8 +847,7 @@ function renderSettingsGeneral() {
 function renderSettingsCommunities() {
   const rows = appState.communities.map((c) => {
     const regionName = appState.regions.find((r) => r.id === c.regionId)?.name || "";
-    const companyName = appState.companies.find((co) => co.id === c.companyId)?.name || "";
-    return `<tr data-id="${c.id}"><td>${c.code || ""}</td><td>${c.name || ""}</td><td>${c.households ?? ""}</td><td>${regionName}</td><td>${companyName}</td><td>${c.coords || ""}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td></tr>`;
+    return `<tr data-id="${c.id}"><td>${c.code || ""}</td><td>${c.name || ""}</td><td>${c.address || ""}</td><td>${regionName}</td><td>${c.coords || ""}</td><td>${c.radiusMeters ?? ""}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td></tr>`;
   }).join("");
 
   settingsContent.innerHTML = `
@@ -648,7 +855,7 @@ function renderSettingsCommunities() {
       <div class="block-header"><span class="block-title">社區列表</span><div class="block-actions"><button id="btnAddCommunity" class="btn">新增</button></div></div>
       <div class="table-wrapper">
         <table class="table">
-          <thead><tr><th>代號</th><th>名稱</th><th>住戶數</th><th>區域</th><th>公司</th><th>定位座標</th><th>操作</th></tr></thead>
+          <thead><tr><th>社區編號</th><th>社區名稱</th><th>地址</th><th>區域</th><th>定位座標</th><th>有效打卡範圍半徑(公尺)</th><th>操作</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -660,22 +867,66 @@ function renderSettingsCommunities() {
     openModal({
       title: "新增社區",
       fields: [
-        { key: "code", label: "代號", type: "text" },
-        { key: "name", label: "名稱", type: "text" },
-        { key: "households", label: "住戶數", type: "number" },
+        { key: "code", label: "社區編號(原代號)", type: "text" },
+        { key: "name", label: "社區名稱", type: "text" },
+        { key: "address", label: "地址", type: "text" },
         { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
-        { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
         { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
+        { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
       ],
       onSubmit: async (d) => {
         try {
           if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
-          const payload = { code: d.code || "", name: d.name || "", households: d.households ?? null, regionId: d.regionId || null, companyId: d.companyId || null, coords: d.coords || "", createdAt: fns.serverTimestamp() };
+          const payload = { code: d.code || "", name: d.name || "", address: d.address || "", regionId: d.regionId || null, coords: d.coords || "", radiusMeters: d.radiusMeters ?? null, createdAt: fns.serverTimestamp() };
           const docRef = await fns.addDoc(fns.collection(db, "communities"), payload);
-          appState.communities.push({ id: docRef.id, ...d });
+          appState.communities.push({ id: docRef.id, ...payload });
         } catch (err) {
           alert(`儲存社區失敗：${err?.message || err}`);
           return false;
+        }
+      },
+      afterRender: ({ body }) => {
+        const addrInput = body.querySelector('[data-key="address"]');
+        const coordsInput = body.querySelector('[data-key="coords"]');
+        const regionSelect = body.querySelector('[data-key="regionId"]');
+        // 依地址自動帶入區域與座標
+        addrInput?.addEventListener("change", async () => {
+          const v = addrInput.value?.trim(); if (!v) return;
+          try {
+            const res = await geocodeAddress(v);
+            const loc = res.geometry.location; const pos = { lat: loc.lat(), lng: loc.lng() };
+            coordsInput.value = `${pos.lat.toFixed(6)},${pos.lng.toFixed(6)}`;
+            const rid = regionIdFromAddressComponents(res.address_components || []);
+            if (rid) regionSelect.value = rid;
+          } catch {}
+        });
+        // 插入地圖編輯按鈕
+        const coordsRow = coordsInput?.parentElement;
+        if (coordsRow) {
+          const btn = document.createElement("button");
+          btn.className = "btn";
+          btn.textContent = "開啟地圖編輯";
+          attachPressInteractions(btn);
+          btn.style.marginTop = "6px";
+          btn.addEventListener("click", async () => {
+            const result = await openMapPicker({ initialAddress: addrInput.value, initialCoords: coordsInput.value, initialRadius: Number(body.querySelector('[data-key="radiusMeters"]').value) || 100 });
+            if (result) {
+              addrInput.value = result.address || addrInput.value;
+              coordsInput.value = result.coords || coordsInput.value;
+              const radiusInput = body.querySelector('[data-key="radiusMeters"]');
+              if (radiusInput && result.radiusMeters != null) radiusInput.value = String(result.radiusMeters);
+              // 反向地理編碼取得區域
+              try {
+                const [lat, lng] = (result.coords || "").split(",").map((s) => parseFloat(s.trim()));
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  const rev = await reverseGeocode(lat, lng);
+                  const rid = regionIdFromAddressComponents(rev.address_components || []);
+                  if (rid) regionSelect.value = rid;
+                }
+              } catch {}
+            }
+          });
+          coordsRow.appendChild(btn);
         }
       },
     });
@@ -692,12 +943,12 @@ function renderSettingsCommunities() {
         openModal({
           title: "編輯社區",
           fields: [
-            { key: "code", label: "代號", type: "text" },
-            { key: "name", label: "名稱", type: "text" },
-            { key: "households", label: "住戶數", type: "number" },
+            { key: "code", label: "社區編號(原代號)", type: "text" },
+            { key: "name", label: "社區名稱", type: "text" },
+            { key: "address", label: "地址", type: "text" },
             { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
-            { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
             { key: "coords", label: "定位座標", type: "text" },
+            { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
           ],
           initial: item,
           onSubmit: async (d) => {
@@ -706,10 +957,10 @@ function renderSettingsCommunities() {
               const payload = {
                 code: d.code ?? item.code ?? "",
                 name: d.name ?? item.name ?? "",
-                households: d.households ?? item.households ?? null,
                 regionId: d.regionId ?? item.regionId ?? null,
-                companyId: d.companyId ?? item.companyId ?? null,
                 coords: d.coords ?? item.coords ?? "",
+                address: d.address ?? item.address ?? "",
+                radiusMeters: d.radiusMeters ?? item.radiusMeters ?? null,
                 updatedAt: fns.serverTimestamp(),
               };
               await fns.setDoc(fns.doc(db, "communities", cid), payload, { merge: true });
@@ -717,6 +968,47 @@ function renderSettingsCommunities() {
             } catch (err) {
               alert(`更新社區失敗：${err?.message || err}`);
               return false;
+            }
+          },
+          afterRender: ({ body }) => {
+            const addrInput = body.querySelector('[data-key="address"]');
+            const coordsInput = body.querySelector('[data-key="coords"]');
+            const regionSelect = body.querySelector('[data-key="regionId"]');
+            addrInput?.addEventListener("change", async () => {
+              const v = addrInput.value?.trim(); if (!v) return;
+              try {
+                const res = await geocodeAddress(v);
+                const loc = res.geometry.location; const pos = { lat: loc.lat(), lng: loc.lng() };
+                coordsInput.value = `${pos.lat.toFixed(6)},${pos.lng.toFixed(6)}`;
+                const rid = regionIdFromAddressComponents(res.address_components || []);
+                if (rid) regionSelect.value = rid;
+              } catch {}
+            });
+            const coordsRow = coordsInput?.parentElement;
+            if (coordsRow) {
+              const btn = document.createElement("button");
+              btn.className = "btn";
+              btn.textContent = "開啟地圖編輯";
+              attachPressInteractions(btn);
+              btn.style.marginTop = "6px";
+              btn.addEventListener("click", async () => {
+                const result = await openMapPicker({ initialAddress: addrInput.value, initialCoords: coordsInput.value, initialRadius: Number(body.querySelector('[data-key="radiusMeters"]').value) || 100 });
+                if (result) {
+                  addrInput.value = result.address || addrInput.value;
+                  coordsInput.value = result.coords || coordsInput.value;
+                  const radiusInput = body.querySelector('[data-key="radiusMeters"]');
+                  if (radiusInput && result.radiusMeters != null) radiusInput.value = String(result.radiusMeters);
+                  try {
+                    const [lat, lng] = (result.coords || "").split(",").map((s) => parseFloat(s.trim()));
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                      const rev = await reverseGeocode(lat, lng);
+                      const rid = regionIdFromAddressComponents(rev.address_components || []);
+                      if (rid) regionSelect.value = rid;
+                    }
+                  } catch {}
+                }
+              });
+              coordsRow.appendChild(btn);
             }
           },
         });
@@ -1071,14 +1363,10 @@ async function ensureFirebase() {
         loginView.classList.add("hidden");
         appView.classList.remove("hidden");
 
-      // 更新頁首使用者資訊
+      // 先以 Auth 設定頁首使用者資訊（後續以 Firestore 覆蓋）
       userNameEl.textContent = user.displayName || user.email || "使用者";
       if (userPhotoEl) {
-        if (user.photoURL) {
-          userPhotoEl.src = user.photoURL;
-        } else {
-          userPhotoEl.removeAttribute("src");
-        }
+        if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
         // 將頭像設為按鈕：點擊開啟個人資訊與登出
         userPhotoEl.onclick = () => showProfileModal(user, role);
       }
@@ -1090,6 +1378,13 @@ async function ensureFirebase() {
       if (userSnap.exists()) {
         const data = userSnap.data();
         role = data.role || role;
+        // 以 Firestore 使用者資料覆蓋頁首姓名與照片（若有）
+        const displayName = data.name || user.displayName || user.email || "使用者";
+        userNameEl.textContent = displayName;
+        if (userPhotoEl) {
+          const photoFromDoc = data.photoUrl || "";
+          if (photoFromDoc) userPhotoEl.src = photoFromDoc; else if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
+        }
       } else {
         await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
       }
@@ -1250,10 +1545,10 @@ async function ensureFirebase() {
           id: docSnap.id,
           code: d.code || "",
           name: d.name || "",
-          households: d.households ?? null,
           regionId: d.regionId || null,
-          companyId: d.companyId || null,
           coords: d.coords || "",
+          address: d.address || "",
+          radiusMeters: d.radiusMeters ?? null,
         });
       });
       items.forEach((it) => {
