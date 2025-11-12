@@ -167,6 +167,7 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
         input.appendChild(o);
       });
       input.value = initial[f.key] ?? (f.options?.[0]?.value ?? "");
+      if (f.readonly) input.disabled = true;
     } else if (f.type === "multiselect") {
       input = document.createElement("div");
       (f.options || []).forEach((opt) => {
@@ -178,6 +179,7 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
         chk.type = "checkbox";
         chk.value = opt.value;
         chk.checked = Array.isArray(initial[f.key]) && initial[f.key].includes(opt.value);
+        if (f.readonly) chk.disabled = true;
         wrap.appendChild(chk);
         wrap.appendChild(document.createTextNode(opt.label));
         input.appendChild(wrap);
@@ -189,10 +191,24 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
       input.type = f.type || "text";
       input.placeholder = f.placeholder || "";
       if (initial && initial[f.key] != null && f.type !== "file") input.value = initial[f.key];
+      if (f.readonly) input.disabled = true;
     }
     input.dataset.key = f.key;
     row.appendChild(label);
     row.appendChild(input);
+    // 檔案欄位預覽（唯讀顯示頭像）
+    if (f.type === "file" && initial && initial[f.key]) {
+      const preview = document.createElement("img");
+      preview.src = initial[f.key];
+      preview.alt = f.label;
+      preview.style.width = "60px";
+      preview.style.height = "60px";
+      preview.style.borderRadius = "50%";
+      preview.style.objectFit = "cover";
+      preview.style.marginTop = "6px";
+      row.appendChild(preview);
+      if (f.readonly) input.disabled = true;
+    }
     body.appendChild(row);
     inputs.push(input);
   });
@@ -304,6 +320,40 @@ if (applyAccountBtn) {
         appState.pendingAccounts.push({ id: id(), ...d, role: "一般", status: "待審核", companyId: null, serviceCommunities: [], createdAt: new Date().toISOString() });
       },
     });
+  });
+}
+
+// 顯示個人資訊彈窗（含登出）
+function showProfileModal(user, role) {
+  const initial = {
+    photoUrl: user.photoURL || "",
+    name: user.displayName || "",
+    email: user.email || "",
+    role: role || "一般",
+    uid: user.uid || "",
+  };
+  openModal({
+    title: "個人資訊",
+    submitText: "登出",
+    initial,
+    fields: [
+      { key: "photoUrl", label: "大頭照", type: "file", readonly: true },
+      { key: "name", label: "姓名", type: "text", readonly: true },
+      { key: "email", label: "電子郵件", type: "email", readonly: true },
+      { key: "role", label: "角色", type: "text", readonly: true },
+      { key: "uid", label: "UID", type: "text", readonly: true },
+    ],
+    onSubmit: async () => {
+      try {
+        if (typeof signOut === "function" && auth) {
+          await signOut(auth);
+        }
+        return true;
+      } catch (e) {
+        alert("登出失敗：" + (e?.message || e));
+        return false;
+      }
+    },
   });
 }
 
@@ -847,18 +897,22 @@ async function ensureFirebase() {
 
   // 監聽登入狀態（容錯：若網路或授權網域設定不完整，改為顯示登入頁）
   try {
-    onAuthStateChanged(auth, async (user) => {
-      if (user) {
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
         // 顯示主頁
         loginView.classList.add("hidden");
         appView.classList.remove("hidden");
 
       // 更新頁首使用者資訊
       userNameEl.textContent = user.displayName || user.email || "使用者";
-      if (user.photoURL) {
-        userPhotoEl.src = user.photoURL;
-      } else {
-        userPhotoEl.removeAttribute("src");
+      if (userPhotoEl) {
+        if (user.photoURL) {
+          userPhotoEl.src = user.photoURL;
+        } else {
+          userPhotoEl.removeAttribute("src");
+        }
+        // 將頭像設為按鈕：點擊開啟個人資訊與登出
+        userPhotoEl.onclick = () => showProfileModal(user, role);
       }
 
       // 確認或建立使用者文件（role 欄位）

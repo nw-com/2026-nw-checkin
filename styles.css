@@ -80,6 +80,8 @@ body {
 .header-right { display: flex; align-items: center; gap: 10px; color: inherit; }
 .user-name { font-size: 14px; color: inherit; }
 .user-photo { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; background: #e5e7eb; }
+/* 將頭像作為可點擊按鈕 */
+.user-photo { cursor: pointer; }
 
 .app-subheader {
   position: fixed; top: 8vh; left: 0; right: 0; height: 6vh; min-height: 44px;
