@@ -1312,9 +1312,18 @@ function renderSettingsAccounts() {
             status: d.status || "在職",
             createdAt: fns.serverTimestamp(),
           };
-          const docRef = await fns.addDoc(fns.collection(db, "users"), payload);
+          // 若有建立 Auth 帳號，使用其 uid 作為文件 ID；否則使用自動 ID
+          let newId = null;
+          if (createdUid) {
+            const ref = fns.doc(db, "users", createdUid);
+            await fns.setDoc(ref, payload);
+            newId = createdUid;
+          } else {
+            const docRef = await fns.addDoc(fns.collection(db, "users"), payload);
+            newId = docRef.id;
+          }
           // 僅在前端狀態保留密碼欄位作為表格顯示，不寫入 Firestore
-          appState.accounts.push({ id: docRef.id, ...d, uid: createdUid || null });
+          appState.accounts.push({ id: newId, ...d, uid: createdUid || null });
         } catch (err) {
           alert(`儲存帳號失敗：${err?.message || err}`);
           return false;
@@ -1525,15 +1534,34 @@ function renderSettingsAccounts() {
             };
             const userDoc = await fns.addDoc(fns.collection(db, "users"), payload);
 
-            // 可選：建立 Auth 帳號，預設密碼為 000000（可在帳號列表中再更新）
+            // 建立 Auth 帳號（先雲端函式，失敗則 REST），預設密碼 000000
             let authCreated = false;
-            if (fns.functions && fns.httpsCallable && item.email) {
-              try {
-                const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
-                await createUser({ email: item.email, password: "000000", name: item.name || "", photoUrl: item.photoUrl || "" });
-                authCreated = true;
-              } catch (err) {
-                console.warn("核准時建立 Auth 失敗", err);
+            let authUid = null;
+            if (item.email) {
+              if (fns.functions && fns.httpsCallable) {
+                try {
+                  const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
+                  const res = await createUser({ email: item.email, password: "000000", name: item.name || "", photoUrl: item.photoUrl || "" });
+                  authUid = res?.data?.uid || null;
+                  authCreated = !!authUid;
+                } catch (err) {
+                  console.warn("核准時建立 Auth 失敗，改用 REST", err);
+                  try {
+                    const r = await createAuthUserViaRest(item.email, "000000");
+                    authUid = r.uid;
+                    authCreated = !!authUid;
+                  } catch (err2) {
+                    console.warn("REST 建立 Auth 失敗", err2);
+                  }
+                }
+              } else {
+                try {
+                  const r = await createAuthUserViaRest(item.email, "000000");
+                  authUid = r.uid;
+                  authCreated = !!authUid;
+                } catch (err2) {
+                  console.warn("REST 建立 Auth 失敗", err2);
+                }
               }
             }
 
@@ -1541,7 +1569,19 @@ function renderSettingsAccounts() {
             await fns.deleteDoc(fns.doc(db, "pendingAccounts", pid));
 
             // 更新前端狀態與 UI
-            appState.accounts.push({ id: userDoc.id, ...payload });
+            // 若成功建立 Auth，覆蓋 users 文件為該 uid
+            if (authUid) {
+              try {
+                const ref = fns.doc(db, "users", authUid);
+                await fns.setDoc(ref, payload, { merge: true });
+                appState.accounts.push({ id: authUid, ...payload, uid: authUid });
+              } catch (e) {
+                // 若覆蓋失敗，至少保留先前 addDoc 版本
+                appState.accounts.push({ id: userDoc.id, ...payload });
+              }
+            } else {
+              appState.accounts.push({ id: userDoc.id, ...payload });
+            }
             appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
             renderSettingsContent("帳號");
             // 提示狀態：已核准基本資料；若未建立 Auth，提醒管理者後續處理
@@ -1597,7 +1637,7 @@ if (!isConfigReady()) {
 // ===== 4) 動態載入 Firebase 模組並初始化 =====
 let firebaseApp, auth, db, functionsApp;
 // 將常用 Firebase 函式存到外層，讓按鈕事件可即時呼叫
-let fns = {
+  let fns = {
   signInWithEmailAndPassword: null,
   createUserWithEmailAndPassword: null,
   signOut: null,
@@ -1611,10 +1651,10 @@ let fns = {
   serverTimestamp: null,
   // Firebase Functions（雲端函式）
   functions: null,
-  httpsCallable: null,
-};
+    httpsCallable: null,
+  };
 
-async function ensureFirebase() {
+  async function ensureFirebase() {
   if (!isConfigReady()) return;
   const [
     { initializeApp },
@@ -1731,6 +1771,24 @@ async function ensureFirebase() {
     loginView.classList.remove("hidden");
     appView.classList.add("hidden");
     emailSignInBtn.disabled = true;
+  }
+
+  // 以 REST 方式建立 Firebase Auth 帳號（不會切換目前登入狀態）
+  async function createAuthUserViaRest(email, password) {
+    const apiKey = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) || null;
+    if (!apiKey) throw new Error("缺少 Firebase apiKey");
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: false }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data?.error?.message || res.statusText || "建立使用者失敗";
+      throw new Error(msg);
+    }
+    return { uid: data.localId };
   }
 
   // 分頁切換
