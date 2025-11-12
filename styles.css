@@ -207,26 +207,74 @@ button[disabled] { cursor: not-allowed; }
 
 /* 首頁大圖：50vw，水平置中，介於頁首與頁中之間（疊加顯示） */
 .home-layout .home-hero {
+  /* 以 CSS 變數統一管理大圖尺寸，確保圓心對準 40vh 分隔線 */
+  --hero-size: clamp(240px, 50vw, 720px);
   position: fixed;
-  top: calc(40vh - 25vw);
+  top: calc(40vh - (var(--hero-size) / 2));
   left: 0;
   right: 0;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
   align-items: center;
   justify-content: center;
+  height: var(--hero-size);
   z-index: 2100;
   /* 置於最上層但不阻擋互動 */
   pointer-events: none;
 }
 .home-layout .home-hero-photo {
-  /* 保持正圓：寬高相同，裁切置中 */
-  width: 50vw;
-  height: 50vw;
-  max-width: 720px;
-  max-height: 720px;
+  /* 保持正圓：寬高一致（使用 clamp 避免寬螢幕超過上限時偏移） */
+  width: var(--hero-size);
+  height: var(--hero-size);
   aspect-ratio: 1 / 1;
   object-fit: cover;
   border-radius: 50%;
   border: 2px solid #ffffff;
   box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+}
+
+.home-layout .home-hero-lunar,
+.home-layout .home-hero-date,
+.home-layout .home-hero-time {
+  color: #ffffff;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+  font-weight: 600;
+}
+.home-layout .home-hero-lunar { font-size: 18px; }
+.home-layout .home-hero-date { font-size: 16px; }
+.home-layout .home-hero-time { font-size: 20px; letter-spacing: 0.5px; }
+
+/* Header內容靠上 */
+.home-layout .app-header {
+  align-items: flex-start;
+  /* 讓左側（Logo+系統名）與右側（歡迎姓名）分散對齊，右側靠右 */
+  justify-content: space-between;
+  padding-top: 8px;
+}
+
+/* 首頁：隱藏右上角小頭像，讓歡迎文字靠右顯示 */
+.home-layout .user-photo { display: none; }
+.home-layout .user-name { text-align: right; }
+
+/* 首頁：地圖覆蓋層（置於頁首上方，透明 10%，與 header 同高） */
+.home-layout .home-map-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 8vh;
+  min-height: 48px;
+  display: grid;
+  place-items: center;
+  z-index: 2000;
+  opacity: 0.10;
+  pointer-events: none; /* 不阻擋點擊 */
+}
+.home-layout .home-map-overlay img {
+  height: 100%;
+  max-width: 90%;
+  object-fit: cover;
+  border-radius: 8px;
 }

@@ -47,6 +47,85 @@ const userPhotoEl = document.getElementById("userPhoto");
 const subTabsEl = document.getElementById("subTabs");
 const homeHero = document.getElementById("homeHero");
 const homeHeroPhoto = document.getElementById("homeHeroPhoto");
+// 首頁：地圖覆蓋層
+const homeMapOverlay = document.getElementById("homeMapOverlay");
+const homeMapImg = document.getElementById("homeMapImg");
+// 首頁：日期、時間、農曆
+const homeTimeEl = document.getElementById("homeTime");
+const homeDateEl = document.getElementById("homeDate");
+const homeLunarEl = document.getElementById("homeLunar");
+let homeClockTimer = null;
+let lastCoords = null;
+
+function updateHomeMap() {
+  if (!homeMapImg || !lastCoords) return;
+  const { latitude, longitude } = lastCoords;
+  const lat = Number(latitude).toFixed(6);
+  const lon = Number(longitude).toFixed(6);
+  // 使用 OpenStreetMap 靜態地圖服務（免金鑰），瀏覽器按高度縮放至 header 高度
+  const url = `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lon}&zoom=14&size=1200x400&markers=${lat},${lon},red-pushpin`;
+  homeMapImg.src = url;
+}
+
+function two(n) { return n < 10 ? "0" + n : "" + n; }
+function formatDateYYYYMMDD(d) {
+  return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
+}
+// 近似判斷當日是否為 24 節氣（本地時區），若符合顯示節氣名稱
+function getApproxSolarTerm(date) {
+  const md = two(date.getMonth() + 1) + '-' + two(date.getDate());
+  const terms = {
+    '01-05': '小寒', '01-06': '小寒',
+    '01-20': '大寒', '01-21': '大寒',
+    '02-03': '立春', '02-04': '立春', '02-05': '立春',
+    '02-18': '雨水', '02-19': '雨水', '02-20': '雨水',
+    '03-05': '驚蟄', '03-06': '驚蟄',
+    '03-20': '春分', '03-21': '春分',
+    '04-04': '清明', '04-05': '清明',
+    '04-19': '穀雨', '04-20': '穀雨',
+    '05-05': '立夏', '05-06': '立夏', '05-07': '立夏',
+    '05-20': '小滿', '05-21': '小滿', '05-22': '小滿',
+    '06-05': '芒種', '06-06': '芒種',
+    '06-21': '夏至', '06-22': '夏至',
+    '07-06': '小暑', '07-07': '小暑', '07-08': '小暑',
+    '07-22': '大暑', '07-23': '大暑', '07-24': '大暑',
+    '08-07': '立秋', '08-08': '立秋', '08-09': '立秋',
+    '08-22': '處暑', '08-23': '處暑', '08-24': '處暑',
+    '09-07': '白露', '09-08': '白露', '09-09': '白露',
+    '09-22': '秋分', '09-23': '秋分', '09-24': '秋分',
+    '10-08': '寒露', '10-09': '寒露',
+    '10-23': '霜降', '10-24': '霜降',
+    '11-07': '立冬', '11-08': '立冬',
+    '11-22': '小雪', '11-23': '小雪',
+    '12-06': '大雪', '12-07': '大雪', '12-08': '大雪',
+    '12-21': '冬至', '12-22': '冬至', '12-23': '冬至'
+  };
+  return terms[md] || '';
+}
+function getLunarString(d) {
+  try {
+    const fmt = new Intl.DateTimeFormat('zh-Hant-u-ca-chinese', { year: 'numeric', month: 'long', day: 'numeric' });
+    const lunar = fmt.format(d); // 例如：甲辰年十月初四
+    const term = getApproxSolarTerm(d);
+    return term ? `農曆 ${lunar}（${term}）` : `農曆 ${lunar}`;
+  } catch (e) {
+    return '農曆（裝置不支援顯示）';
+  }
+}
+function updateHomeClockOnce() {
+  const now = new Date();
+  if (homeTimeEl) homeTimeEl.textContent = `${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`;
+  if (homeDateEl) homeDateEl.textContent = `${formatDateYYYYMMDD(now)}`;
+  if (homeLunarEl) homeLunarEl.textContent = getLunarString(now);
+}
+function startHomeClock() {
+  stopHomeClock();
+  updateHomeClockOnce();
+  homeClockTimer = setInterval(updateHomeClockOnce, 1000);
+}
+function stopHomeClock() {
+  if (homeClockTimer) { clearInterval(homeClockTimer); homeClockTimer = null; }
+}
 
 const homeSection = document.getElementById("homeSection");
 const checkinSection = document.getElementById("checkinSection");
@@ -2045,8 +2124,11 @@ let firebaseApp, auth, db, functionsApp;
     settingsSection.classList.toggle("hidden", tab !== "settings");
     // 首頁專用版面：切換 home-layout 類別
     appView.classList.toggle("home-layout", tab === "home");
-    // 首頁專用大圖顯示切換
+    // 首頁專用大圖顯示與時鐘切換
     homeHero?.classList.toggle("hidden", tab !== "home");
+    // 首頁：地圖覆蓋層顯示切換
+    homeMapOverlay?.classList.toggle("hidden", tab !== "home");
+    if (tab === "home") { startHomeClock(); } else { stopHomeClock(); }
     renderSubTabs(tab);
   }
 
@@ -2101,6 +2183,9 @@ let firebaseApp, auth, db, functionsApp;
       (pos) => {
         const { latitude, longitude } = pos.coords;
         locationInfo.textContent = `目前位置：${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+        // 記錄座標並更新首頁地圖（若在首頁）
+        lastCoords = { latitude, longitude };
+        updateHomeMap();
       },
       (err) => {
         locationInfo.textContent = `定位失敗：${err?.message || err}`;
