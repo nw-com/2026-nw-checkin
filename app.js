@@ -479,8 +479,38 @@ if (applyAccountBtn) {
         { key: "birthdate", label: "出生年月日", type: "date" },
         { key: "licenses", label: "相關證照", type: "multiselect", options: optionList(appState.licenses) },
       ],
-      onSubmit: (d) => {
-        appState.pendingAccounts.push({ id: id(), ...d, role: "一般", status: "待審核", companyId: null, serviceCommunities: [], createdAt: new Date().toISOString() });
+      onSubmit: async (d) => {
+        try {
+          // 密碼僅用於顯示，不寫入 Firestore
+          const pendingPayload = {
+            photoUrl: d.photoUrl || "",
+            name: d.name || "",
+            title: d.title || "",
+            email: d.email || "",
+            phone: d.phone || "",
+            licenses: Array.isArray(d.licenses) ? d.licenses : [],
+            role: "一般",
+            companyId: null,
+            serviceCommunities: [],
+            pagePermissions: [],
+            status: "待審核",
+          };
+          if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
+            const docRef = await fns.addDoc(fns.collection(db, "pendingAccounts"), {
+              ...pendingPayload,
+              createdAt: fns.serverTimestamp(),
+            });
+            appState.pendingAccounts.push({ id: docRef.id, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
+          } else {
+            // Firestore 尚未初始化時，先寫入前端狀態
+            appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "", createdAt: new Date().toISOString() });
+          }
+          renderSettingsContent("帳號");
+          return true;
+        } catch (err) {
+          alert(`提交帳號申請失敗：${err?.message || err}`);
+          return false;
+        }
       },
     });
   });
@@ -1496,13 +1526,14 @@ function renderSettingsAccounts() {
             const userDoc = await fns.addDoc(fns.collection(db, "users"), payload);
 
             // 可選：建立 Auth 帳號，預設密碼為 000000（可在帳號列表中再更新）
+            let authCreated = false;
             if (fns.functions && fns.httpsCallable && item.email) {
               try {
                 const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
                 await createUser({ email: item.email, password: "000000", name: item.name || "", photoUrl: item.photoUrl || "" });
+                authCreated = true;
               } catch (err) {
                 console.warn("核准時建立 Auth 失敗", err);
-                alert("警告：未能建立登入帳號（Auth）。你可稍後在帳號列表編輯密碼或部署雲端函式。");
               }
             }
 
@@ -1513,6 +1544,12 @@ function renderSettingsAccounts() {
             appState.accounts.push({ id: userDoc.id, ...payload });
             appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
             renderSettingsContent("帳號");
+            // 提示狀態：已核准基本資料；若未建立 Auth，提醒管理者後續處理
+            if (authCreated) {
+              alert("核准完成：已加入帳號列表，登入預設密碼為 000000。");
+            } else {
+              alert("核准完成（部分）：已加入帳號列表，但未建立登入帳號（Auth）。請稍後在帳號列表設定密碼或部署雲端函式。");
+            }
           } catch (err) {
             alert(`核准帳號失敗：${err?.message || err}`);
           }
@@ -1595,7 +1632,8 @@ async function ensureFirebase() {
   firebaseApp = initializeApp(FIREBASE_CONFIG);
   auth = getAuth(firebaseApp);
   db = getFirestore(firebaseApp);
-  functionsApp = getFunctions(firebaseApp);
+  // 明確指定雲端函式區域，避免跨區造成呼叫錯誤或 CORS 問題
+  functionsApp = getFunctions(firebaseApp, "us-central1");
 
   // 將函式指派到外層供事件使用
   fns.signInWithEmailAndPassword = signInWithEmailAndPassword;
@@ -1819,6 +1857,40 @@ async function ensureFirebase() {
       if (activeMainTab === "settings" && activeSubTab === "社區") renderSettingsContent("社區");
     } catch (err) {
       console.warn("載入 Firestore communities 失敗：", err);
+    }
+  }
+
+  // 待審核帳號：從 Firestore 載入
+  async function loadPendingAccountsFromFirestore() {
+    if (!db || !fns.getDocs || !fns.collection) return;
+    try {
+      const snap = await fns.getDocs(fns.collection(db, "pendingAccounts"));
+      const items = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() || {};
+        items.push({
+          id: docSnap.id,
+          photoUrl: d.photoUrl || "",
+          name: d.name || "",
+          title: d.title || "",
+          email: d.email || "",
+          phone: d.phone || "",
+          licenses: Array.isArray(d.licenses) ? d.licenses : [],
+          role: d.role || "一般",
+          companyId: d.companyId || null,
+          serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
+          pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : [],
+          status: d.status || "待審核",
+        });
+      });
+      // 覆蓋或新增到前端狀態
+      items.forEach((it) => {
+        const idx = appState.pendingAccounts.findIndex((a) => a.id === it.id);
+        if (idx >= 0) appState.pendingAccounts[idx] = { ...appState.pendingAccounts[idx], ...it }; else appState.pendingAccounts.push(it);
+      });
+      if (activeMainTab === "settings" && activeSubTab === "帳號") renderSettingsContent("帳號");
+    } catch (err) {
+      console.warn("載入 Firestore pendingAccounts 失敗：", err);
     }
   }
 
