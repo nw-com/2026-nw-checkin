@@ -51,5 +51,29 @@ service cloud.firestore {
       allow create: if isLoggedIn();
       allow update, delete: if isAdmin() || (isLoggedIn() && resource.data.userId == request.auth.uid);
     }
+
+    // 帳號申請：任何人可提交；僅管理員可讀取/修改/刪除
+    match /pendingAccounts/{docId} {
+      allow create: if
+        request.resource.data.keys().hasOnly([
+          'photoUrl','name','title','email','phone','licenses','role',
+          'companyId','serviceCommunities','pagePermissions','status','createdAt'
+        ]) &&
+        (request.resource.data.photoUrl == null || request.resource.data.photoUrl is string) &&
+        request.resource.data.name is string &&
+        (request.resource.data.title == null || request.resource.data.title is string) &&
+        request.resource.data.email is string &&
+        (request.resource.data.phone == null || request.resource.data.phone is string) &&
+        (request.resource.data.licenses == null || request.resource.data.licenses is list) &&
+        (request.resource.data.companyId == null || request.resource.data.companyId is string) &&
+        (request.resource.data.serviceCommunities == null || request.resource.data.serviceCommunities is list) &&
+        (request.resource.data.pagePermissions == null || request.resource.data.pagePermissions is list) &&
+        request.resource.data.role == '一般' &&
+        request.resource.data.status == '待審核' &&
+        request.resource.data.createdAt is timestamp;
+
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
   }
 }

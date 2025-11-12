@@ -1703,8 +1703,10 @@ async function ensureFirebase() {
         loadLicensesFromFirestore(),
         loadCommunitiesFromFirestore(),
       ]);
-      // 載入待審核帳號
-      await loadPendingAccountsFromFirestore();
+      // 僅系統管理員載入待審核帳號，避免非管理員被規則擋讀
+      if (role === "系統管理員") {
+        await loadPendingAccountsFromFirestore();
+      }
       if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
 
         // 啟用定位顯示
