@@ -276,13 +276,8 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
   const hTitle = document.createElement("div");
   hTitle.className = "modal-title";
   hTitle.textContent = title;
-  const btnClose = document.createElement("button");
-  btnClose.className = "btn";
-  btnClose.textContent = "關閉";
-  attachPressInteractions(btnClose);
-  btnClose.addEventListener("click", () => closeModal());
   header.appendChild(hTitle);
-  header.appendChild(btnClose);
+  // 移除標題列的「關閉」按鈕，改由底部「取消」控制關閉
 
   const body = document.createElement("div");
   body.className = "modal-body";
@@ -573,6 +568,86 @@ function openMapPicker({ initialAddress = "", initialCoords = "", initialRadius 
   });
 }
 
+// 打卡用地圖檢視（不可編輯地址/座標/半徑，顯示目前位置與公司/社區位置與範圍）
+function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius = 100 }) {
+  return new Promise(async (resolve) => {
+    await ensureGoogleMaps();
+    let currentLat = null, currentLng = null;
+    const parseCoords = (str) => {
+      const [la, ln] = String(str || "").split(",").map((s) => s.trim());
+      const lat = parseFloat(la); const lng = parseFloat(ln);
+      if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+      return null;
+    };
+    const target = parseCoords(targetCoords) || { lat: 25.041, lng: 121.532 };
+
+    openModal({
+      title: "打卡定位",
+      fields: [],
+      submitText: "確認",
+      onSubmit: async () => {
+        resolve({ lat: currentLat, lng: currentLng });
+        return true;
+      },
+      afterRender: async ({ body, footer }) => {
+        const maps = await ensureGoogleMaps();
+        const mapBox = document.createElement("div");
+        mapBox.style.width = "100%";
+        mapBox.style.height = "360px";
+        mapBox.style.marginTop = "8px";
+        body.appendChild(mapBox);
+        const map = new maps.Map(mapBox, { center: target, zoom: 16 });
+        const targetMarker = new maps.Marker({ position: target, map, draggable: false, title: targetName || "打卡點" });
+        const circle = new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: target, radius: Number(targetRadius) || 100 });
+
+        let currentMarker = null;
+        const info = document.createElement("div");
+        info.className = "muted";
+        info.style.marginTop = "8px";
+        info.textContent = "定位中…";
+        body.appendChild(info);
+
+        const updateCurrent = (lat, lng) => {
+          currentLat = lat; currentLng = lng;
+          info.textContent = `目前位置：${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+          if (!currentMarker) currentMarker = new maps.Marker({ position: { lat, lng }, map, draggable: false, title: "目前位置" });
+          else currentMarker.setPosition({ lat, lng });
+        };
+
+        // 初次定位
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => { updateCurrent(pos.coords.latitude, pos.coords.longitude); },
+            (err) => { info.textContent = `定位失敗：${err?.message || err}`; },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+          );
+        } else {
+          info.textContent = "此裝置不支援定位";
+        }
+
+        // 重新定位按鈕（不可編輯座標/地址/半徑）
+        const btnRelocate = document.createElement("button");
+        btnRelocate.className = "btn";
+        btnRelocate.textContent = "重新定位";
+        attachPressInteractions(btnRelocate);
+        footer.insertBefore(btnRelocate, footer.querySelector(".btn.btn-primary"));
+        btnRelocate.addEventListener("click", () => {
+          if ("geolocation" in navigator) {
+            info.textContent = "定位中…";
+            navigator.geolocation.getCurrentPosition(
+              (pos) => { updateCurrent(pos.coords.latitude, pos.coords.longitude); },
+              (err) => { info.textContent = `定位失敗：${err?.message || err}`; },
+              { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+            );
+          }
+        });
+      },
+    });
+    const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
+    cancelBtn?.addEventListener('click', () => resolve(null));
+  });
+}
+
 function companyStats(companyId) {
   const communityCount = appState.communities.filter((c) => c.companyId === companyId).length;
   const staff = appState.accounts.filter((a) => a.companyId === companyId);
@@ -715,7 +790,7 @@ function showProfileModal(user, role) {
         btnEdit.className = "btn";
         btnEdit.textContent = "編輯";
         attachPressInteractions(btnEdit);
-        header.insertBefore(btnEdit, header.lastChild); // 放在關閉按鈕前
+        header.appendChild(btnEdit); // 標題右側加入「編輯」按鈕
 
         let editing = false;
 
@@ -2361,3 +2436,205 @@ btnLeaveRequest?.addEventListener("click", () => setHomeStatus("leave-request", 
 btnMakeup?.addEventListener("click", () => {
   if (homeStatusEl) homeStatusEl.textContent = "補卡";
 });
+
+// ===== 上班打卡完整流程（位置 → 地圖 → 自拍 → 儲存） =====
+async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
+  try {
+    // 1) 依角色載入打卡位置選項
+    const userRole = appState.currentUserRole || "一般";
+    const adminRoles = new Set(["系統管理員", "管理層", "高階主管", "初階主管", "行政"]);
+    // 依使用者帳號與角色找出可選位置
+    let options = [];
+    let sourceType = "company"; // company | community
+    if (adminRoles.has(userRole)) {
+      options = optionList(appState.companies);
+      sourceType = "company";
+    } else {
+      // 一般/勤務：優先使用使用者的 serviceCommunities；若無則顯示全部社區
+      let userAccount = null;
+      if (appState.currentUserId) {
+        userAccount = appState.accounts.find((a) => a.id === appState.currentUserId) || null;
+      }
+      const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
+      const communities = appState.communities.filter((c) => !allowedCommunityIds || allowedCommunityIds.has(c.id));
+      options = communities.map((c) => ({ value: c.id, label: c.name }));
+      sourceType = "community";
+    }
+
+    const selectedLocation = await new Promise((resolve) => {
+      openModal({
+        title: "選擇打卡位置",
+        fields: [
+          { key: "place", label: "打卡位置", type: "select", options: options },
+        ],
+        submitText: "確認",
+        onSubmit: async (data) => {
+          const id = data.place;
+          let item = null;
+          if (sourceType === "company") {
+            item = appState.companies.find((c) => c.id === id) || null;
+          } else {
+            item = appState.communities.find((c) => c.id === id) || null;
+          }
+          if (!item) { alert("無法識別選擇的位置"); return false; }
+          resolve({
+            type: sourceType,
+            id: item.id,
+            name: item.name || "",
+            coords: item.coords || "",
+            address: item.address || "",
+          });
+          return true;
+        },
+      });
+      // 取消時回傳 null
+      const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
+      cancelBtn?.addEventListener('click', () => resolve(null));
+    });
+    if (!selectedLocation) return; // 使用者取消
+
+    // 2) 地圖定位檢視（顯示目前位置與打卡範圍），並取得目前位置座標
+    const viewerRes = await openCheckinMapViewer({
+      targetName: selectedLocation.name,
+      targetCoords: selectedLocation.coords || "",
+      targetRadius: selectedLocation.radiusMeters ?? 100,
+    });
+    if (!viewerRes) return; // 使用者取消
+    const lat = viewerRes?.lat; const lng = viewerRes?.lng;
+    const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
+
+    // 3) 自拍與留言（浮水印三列）
+    const photoDataUrl = await new Promise((resolve) => {
+      let captured = null;
+      openModal({
+        title: "自拍打卡",
+        fields: [
+          { key: "message", label: "留言（選填，最多 30 字）", type: "text", placeholder: "最多 30 字" },
+        ],
+        submitText: "確認",
+        onSubmit: async (data) => {
+          if (!captured) { alert("請先拍照"); return false; }
+          // 最多 30 字
+          const msg = (data.message || "").slice(0, 30);
+          // 於 Canvas 上繪製浮水印三列
+          try {
+            const img = new Image();
+            img.src = captured;
+            await new Promise((r) => { img.onload = r; img.onerror = r; });
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || 1080;
+            canvas.height = img.naturalHeight || 1440;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // 水印樣式
+            const pad = Math.floor(canvas.height * 0.02);
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.fillRect(0, canvas.height - pad*7, canvas.width, pad*7);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `${Math.max(16, Math.floor(canvas.height*0.03))}px sans-serif`;
+            ctx.textBaseline = 'top';
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+            const nameElText = (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '');
+            const line1 = `${dateStr} ${nameElText || '使用者'}`;
+            const line2 = `${hasCoords ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '座標未知'} ${statusLabel}`;
+            const line3 = msg || '';
+            const x = pad; let y = canvas.height - pad*6.5;
+            ctx.fillText(line1, x, y); y += pad*2.2;
+            ctx.fillText(line2, x, y); y += pad*2.2;
+            ctx.fillText(line3, x, y);
+            const out = canvas.toDataURL('image/jpeg', 0.92);
+            resolve({ photo: out, message: msg });
+            return true;
+          } catch (e) {
+            alert(`生成浮水印失敗：${e?.message || e}`);
+            return false;
+          }
+        },
+        afterRender: async ({ body }) => {
+          // 建立攝影機預覽與快門
+          const video = document.createElement('video');
+          video.autoplay = true; video.playsInline = true; video.muted = true;
+          video.style.width = '100%'; video.style.maxHeight = '45vh'; video.style.background = '#000';
+          video.style.borderRadius = '8px';
+          const controls = document.createElement('div');
+          controls.style.display = 'flex'; controls.style.gap = '12px'; controls.style.marginTop = '8px';
+          const btnSnap = document.createElement('button'); btnSnap.className = 'btn btn-primary'; btnSnap.textContent = '快門'; attachPressInteractions(btnSnap);
+          const preview = document.createElement('img'); preview.style.width = '100%'; preview.style.marginTop = '8px'; preview.alt = '預覽照片';
+          controls.appendChild(btnSnap);
+          body.appendChild(video);
+          body.appendChild(controls);
+          body.appendChild(preview);
+          let stream = null;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+            video.srcObject = stream;
+          } catch (err) {
+            const msg = `無法啟用相機：${err?.message || err}`;
+            const warn = document.createElement('div'); warn.textContent = msg; warn.style.color = '#b00020'; warn.style.marginTop = '8px'; body.appendChild(warn);
+          }
+          btnSnap.addEventListener('click', async () => {
+            try {
+              const track = stream?.getVideoTracks?.()[0];
+              const settings = track?.getSettings?.() || {};
+              const w = settings.width || 1080; const h = settings.height || 1440;
+              const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              // 將影片畫面繪到畫布（簡單直繪，避免裁切）
+              ctx.drawImage(video, 0, 0, w, h);
+              captured = canvas.toDataURL('image/jpeg', 0.92);
+              preview.src = captured;
+            } catch (e) {
+              alert(`拍照失敗：${e?.message || e}`);
+            }
+          });
+        },
+      });
+      // 取消時回傳 null
+      const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
+      cancelBtn?.addEventListener('click', () => resolve(null));
+    });
+    if (!photoDataUrl) return; // 使用者取消
+
+    // 4) 寫入 Firestore 並更新首頁 F 列摘要
+    try {
+      await ensureFirebase();
+      const user = auth?.currentUser || null;
+      const role = appState.currentUserRole || "一般";
+      const payload = {
+        uid: user?.uid || null,
+        name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || (user?.email || '使用者'),
+        role,
+        status: statusLabel,
+        locationType: selectedLocation.type,
+        locationId: selectedLocation.id,
+        locationName: selectedLocation.name,
+        lat: hasCoords ? lat : null,
+        lng: hasCoords ? lng : null,
+        message: photoDataUrl.message || "",
+        photoData: photoDataUrl.photo,
+        createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+      };
+      if (db && fns.addDoc && fns.collection) {
+        await fns.addDoc(fns.collection(db, "checkins"), payload);
+      }
+      // 更新首頁 F 列摘要
+      const fRow = document.querySelector('.row-f');
+      const now = new Date();
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      if (fRow) {
+        fRow.textContent = `${dateStr} ${selectedLocation.name} ${statusLabel}`;
+      }
+      // 最終切換狀態顯示與動畫
+      setHomeStatus(statusKey, statusLabel);
+    } catch (err) {
+      alert(`打卡資料寫入失敗：${err?.message || err}`);
+    }
+  } catch (err) {
+    alert(`打卡流程錯誤：${err?.message || err}`);
+  }
+}
+
+// 將「上班」按鈕改為啟動完整打卡流程
+btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
+btnStart?.addEventListener("click", () => startCheckinFlow("work", "上班"));
