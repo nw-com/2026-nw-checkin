@@ -55,6 +55,9 @@ const homeMapImg = document.getElementById("homeMapImg");
 // 首頁：日期、時間、農曆
 const homeTimeEl = document.getElementById("homeTime");
 const homeDateEl = document.getElementById("homeDate");
+// 首頁 D 區塊：登入者姓名（顯示於地圖之上、文字之下）
+const homeHeaderNameEl = document.getElementById("homeHeaderName");
+// 舊版農曆元素（首頁已不再顯示），保留為相容但不再更新
 const homeLunarEl = document.getElementById("homeLunar");
 let homeClockTimer = null;
 let lastCoords = null;
@@ -128,7 +131,6 @@ function updateHomeClockOnce() {
   const now = nowInTZ('Asia/Taipei');
   if (homeTimeEl) homeTimeEl.textContent = `${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`;
   if (homeDateEl) homeDateEl.textContent = `${formatDateYYYYMMDD(now)}`;
-  if (homeLunarEl) homeLunarEl.textContent = getLunarString(now);
 }
 function startHomeClock() {
   stopHomeClock();
@@ -1839,7 +1841,9 @@ let firebaseApp, auth, db, functionsApp;
         appView.classList.remove("hidden");
 
       // 先以 Auth 設定頁首使用者資訊（後續以 Firestore 覆蓋）
-        userNameEl.textContent = `歡迎~ ${user.displayName || user.email || "使用者"}`;
+        const initialDisplayName = user.displayName || user.email || "使用者";
+        userNameEl.textContent = `歡迎~ ${initialDisplayName}`;
+        if (homeHeaderNameEl) homeHeaderNameEl.textContent = initialDisplayName;
       if (userPhotoEl) {
         if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
         // 將頭像設為按鈕：點擊開啟個人資訊與登出
@@ -1859,6 +1863,7 @@ let firebaseApp, auth, db, functionsApp;
         // 以 Firestore 使用者資料覆蓋頁首姓名與照片（若有）
         const displayName = data.name || user.displayName || user.email || "使用者";
         userNameEl.textContent = `歡迎~ ${displayName}`;
+        if (homeHeaderNameEl) homeHeaderNameEl.textContent = displayName;
         if (userPhotoEl) {
           const photoFromDoc = data.photoUrl || "";
           if (photoFromDoc) userPhotoEl.src = photoFromDoc; else if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
@@ -1867,7 +1872,7 @@ let firebaseApp, auth, db, functionsApp;
           const photoFromDoc = data.photoUrl || "";
           if (photoFromDoc) homeHeroPhoto.src = photoFromDoc; else if (user.photoURL) homeHeroPhoto.src = user.photoURL; else homeHeroPhoto.removeAttribute("src");
         }
-      } else {
+    } else {
         await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
       }
       // 將目前使用者資訊保存於 appState 供權限檢查
@@ -1904,6 +1909,7 @@ let firebaseApp, auth, db, functionsApp;
         appView.classList.add("hidden");
         loginView.classList.remove("hidden");
         userNameEl.textContent = "未登入";
+        if (homeHeaderNameEl) homeHeaderNameEl.textContent = "";
         userPhotoEl.removeAttribute("src");
         // 登出時恢復顯示所有分頁
         resetPagePermissions();

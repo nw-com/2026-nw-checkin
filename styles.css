@@ -191,7 +191,11 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .app-header {
   height: 40vh;
   min-height: 40vh;
-  /* 保持 Flex 以呈現左/右兩區；A 列高度 8vh 由子元素控制 */
+  position: fixed; top: 0; left: 0; right: 0;
+  /* 使用 Grid 切為 A/B/C/D/E 五列 */
+  display: grid;
+  grid-template-rows: 8vh 6vh 6vh 6vh calc(var(--hero-size) / 2);
+  background: #CC0000;
 }
 .home-layout .app-subheader {
   display: none;
@@ -243,21 +247,20 @@ button[disabled] { cursor: not-allowed; }
   text-shadow: 0 1px 2px rgba(0,0,0,0.35);
   font-weight: 600;
 }
-/* B 列：農曆（細體，列高 6vh 的 60%） */
-.home-layout .home-hero-lunar { font-size: 3.6vh; font-weight: 300; }
-/* C 列：西元日期（粗體，列高 6vh 的 80%） */
-.home-layout .home-hero-date { font-size: 4.8vh; font-weight: 700; }
-/* D 列：時間（粗體，列高 6vh 的 100%） */
-.home-layout .home-hero-time { font-size: 6vh; font-weight: 700; letter-spacing: 0.5px; }
+/* A/B/C/D/E 文字堆疊（置於地圖上方） */
+.home-layout .home-header-stack { position: absolute; inset: 0; display: grid; grid-template-rows: 8vh 6vh 6vh 6vh calc(var(--hero-size) / 2); z-index: 2; }
+.home-layout .home-header-stack .stack-row { display: grid; place-items: center; }
+.home-layout .home-header-stack .stack-text { color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+/* B 列：西元日期（細體，列高 6vh 的 80%） */
+.home-layout .home-header-stack .date { font-size: 4.8vh; font-weight: 300; }
+/* C 列：時間（粗體，列高 6vh 的 100%） */
+.home-layout .home-header-stack .time { font-size: 6vh; font-weight: 700; letter-spacing: 0.5px; }
+/* D 列：登入者姓名（細體，列高 6vh 的 80%） */
+.home-layout .home-header-stack .name { font-size: 4.8vh; font-weight: 300; }
 
 /* Header內容靠上 */
-.home-layout .app-header {
-  align-items: flex-start;
-  /* 讓左側（Logo+系統名）與右側（歡迎姓名）分散對齊，右側靠右 */
-  justify-content: space-between;
-  padding-top: 8px;
-  background: #CC0000; /* 首頁分頁的頁首背景色 */
-}
+.home-layout .app-header .header-left { position: relative; z-index: 2; display: flex; align-items: center; padding: 0 14px; }
+.home-layout .app-header .header-right { display: none; }
 .home-layout .app-header .header-left,
 .home-layout .app-header .header-right { height: 8vh; display: flex; align-items: center; }
 
@@ -278,19 +281,5 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .user-name { text-align: right; }
 
 /* 首頁：地圖覆蓋層（置於頁首上方，透明 10%，與 header 同高） */
-.home-layout .home-map-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 40vh; /* 與首頁 header 同高，覆蓋整個紅色區塊 */
-  min-height: 40vh;
-  z-index: 900; /* 地圖在文字下方、頁面背景上方 */
-  opacity: 0.40; /* 提高透明度至 40% */
-  pointer-events: none; /* 不阻擋點擊 */
-}
-.home-layout .home-map-overlay img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover; /* 填滿 header 高度 */
-}
+.home-layout .app-header .home-map-overlay { position: absolute; inset: 0; z-index: 1; opacity: 0.40; pointer-events: none; }
+.home-layout .app-header .home-map-overlay img { width: 100%; height: 100%; object-fit: cover; }
