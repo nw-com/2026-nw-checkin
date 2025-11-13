@@ -2313,7 +2313,7 @@ let firebaseApp, auth, db, functionsApp;
   const [
     { initializeApp },
     { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
-    { getFirestore, initializeFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp },
+    { getFirestore, initializeFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp, query, where, orderBy, limit },
     { getFunctions, httpsCallable },
   ] = await Promise.all([
     import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
@@ -2347,6 +2347,11 @@ let firebaseApp, auth, db, functionsApp;
   fns.deleteDoc = deleteDoc;
   fns.updateDoc = updateDoc;
   fns.serverTimestamp = serverTimestamp;
+  // 查詢輔助
+  fns.query = query;
+  fns.where = where;
+  fns.orderBy = orderBy;
+  fns.limit = limit;
   // 雲端函式
   fns.functions = functionsApp;
   fns.httpsCallable = httpsCallable;
@@ -2401,6 +2406,44 @@ let firebaseApp, auth, db, functionsApp;
 
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
       applyPagePermissionsForUser(user);
+
+      // 載入「最後一次打卡」並套用到首頁狀態與頁中 G
+      try {
+        const q = fns.query(
+          fns.collection(db, "checkins"),
+          fns.where("uid", "==", user.uid),
+          fns.orderBy("createdAt", "desc"),
+          fns.limit(1)
+        );
+        const snap = await fns.getDocs(q);
+        if (!snap.empty) {
+          const d = snap.docs[0].data();
+          const gRow = document.querySelector('.row-g');
+          const val = d.createdAt;
+          let dt;
+          if (val && typeof val.toDate === 'function') dt = val.toDate();
+          else if (typeof val === 'string') dt = new Date(val);
+          else dt = new Date();
+          const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
+          if (gRow) gRow.textContent = `${dateStr} ${d.locationName || ''} ${d.status || ''}`.trim();
+          const label = d.status || '';
+          const mapLabelToKey = (s) => {
+            switch (s) {
+              case '上班': return 'work';
+              case '下班': return 'off';
+              case '外出': return 'out';
+              case '抵達': return 'arrive';
+              case '返回': return 'return';
+              case '離開': return 'leave';
+              case '請假': return 'leave-request';
+              default: return 'work';
+            }
+          };
+          setHomeStatus(mapLabelToKey(label), label);
+        }
+      } catch (e) {
+        // 讀取失敗時忽略，不影響主要流程
+      }
 
       // 從 Firestore 載入 users 清單，帶入帳號列表
       await loadAccountsFromFirestore();
@@ -2998,6 +3041,9 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
           body.appendChild(video);
           body.appendChild(controls);
           body.appendChild(preview);
+          // 讓「確認」按鈕在未拍照前不可用
+          const submitBtn = modalRoot?.querySelector('.modal-footer .btn.btn-primary');
+          if (submitBtn) { submitBtn.disabled = true; submitBtn.title = '請先拍照'; }
           let stream = null;
           try {
             // 不限定鏡頭，優先確保任一相機可開啟
@@ -3033,6 +3079,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
               ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tw, th);
               captured = canvas.toDataURL('image/jpeg', 0.92);
               preview.src = captured;
+              if (submitBtn) { submitBtn.disabled = false; submitBtn.title = ''; }
             } catch (e) {
               alert(`拍照失敗：${e?.message || e}`);
             }
@@ -3067,12 +3114,17 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       if (db && fns.addDoc && fns.collection) {
         await fns.addDoc(fns.collection(db, "checkins"), payload);
       }
-      // 更新首頁 F 列摘要
+      // 更新首頁 G 列摘要，並移除 F 列顯示
+      const gRow = document.querySelector('.row-g');
       const fRow = document.querySelector('.row-f');
       const now = new Date();
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+      if (gRow) {
+        gRow.textContent = `${dateStr} ${selectedLocation.name} ${statusLabel}`;
+      }
       if (fRow) {
-        fRow.textContent = `${dateStr} ${selectedLocation.name} ${statusLabel}`;
+        fRow.textContent = '';
+        fRow.classList.add('hidden');
       }
       // 最終切換狀態顯示與動畫
       setHomeStatus(statusKey, statusLabel);

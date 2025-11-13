@@ -241,6 +241,15 @@ button[disabled] { cursor: not-allowed; }
   width: 100%;
   margin-inline: auto; /* 置中（不影響 100% 滿版顯示） */
 }
+.home-layout .home-mid-stack .row-g {
+  width: 100%;
+  margin-inline: auto;
+  background: #e8f5e9; /* 淺綠色背景 */
+  border: 1px solid #c8e6c9; /* 淺綠色邊框 */
+  border-radius: 8px;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}
 .home-layout .home-mid-stack .status-text { font-size: 4vh; font-weight: 400; }
 .home-layout .home-mid-stack .btn {
   height: 4.2vh;
