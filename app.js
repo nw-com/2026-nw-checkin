@@ -2293,7 +2293,7 @@ let firebaseApp, auth, db, functionsApp;
   const [
     { initializeApp },
     { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
-    { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp },
+    { getFirestore, initializeFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp },
     { getFunctions, httpsCallable },
   ] = await Promise.all([
     import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
@@ -2305,7 +2305,11 @@ let firebaseApp, auth, db, functionsApp;
   // 初始化 Firebase
   firebaseApp = initializeApp(FIREBASE_CONFIG);
   auth = getAuth(firebaseApp);
-  db = getFirestore(firebaseApp);
+  // 在部分網路/代理環境下，Firestore 的 WebChannel 可能被中止，改用長輪詢以避免 Listen 連線被瀏覽器中止的噪音錯誤
+  db = initializeFirestore(firebaseApp, {
+    experimentalAutoDetectLongPolling: true,
+    useFetchStreams: false,
+  });
   // 明確指定雲端函式區域，避免跨區造成呼叫錯誤或 CORS 問題
   functionsApp = getFunctions(firebaseApp, "us-central1");
 
