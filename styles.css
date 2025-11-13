@@ -250,18 +250,21 @@ button[disabled] { cursor: not-allowed; }
 /* A/B/C/D/E 文字堆疊（置於地圖上方） */
 .home-layout .home-header-stack { position: absolute; inset: 0; display: grid; grid-template-rows: 5% 5% 5% 9% 16%; z-index: 2; }
 .home-layout .home-header-stack .stack-row { display: grid; place-items: center; }
+.home-layout .home-header-stack .row-b,
+.home-layout .home-header-stack .row-c,
+.home-layout .home-header-stack .row-d { place-items: start center; }
 .home-layout .home-header-stack .stack-text { color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
 /* B 列：西元日期（細體，列高 6vh 的 80%） */
-.home-layout .home-header-stack .date { font-size: 4.8vh; font-weight: 300; }
+.home-layout .home-header-stack .date { font-size: 1.2vh; font-weight: 300; }
 /* C 列：時間（粗體，列高 6vh 的 100%） */
-.home-layout .home-header-stack .time { font-size: 6vh; font-weight: 700; letter-spacing: 0.5px; }
+.home-layout .home-header-stack .time { font-size: 1.6vh; font-weight: 700; letter-spacing: 0.5px; }
 /* D 列：登入者姓名（細體，列高 6vh 的 80%） */
-.home-layout .home-header-stack .name { font-size: 4.8vh; font-weight: 300; }
+.home-layout .home-header-stack .name { font-size: 2.16vh; font-weight: 300; }
 
 /* Header內容靠上 */
 .home-layout .app-header .header-left { display: none; }
 .home-layout .app-header .header-right { display: none; }
-.home-layout .app-header .header-left { height: 8vh; display: flex; align-items: center; }
+.home-layout .app-header .header-right { height: 8vh; }
 
 /* 首頁：A/B/C/D/E 堆疊容器（置於地圖上方） */
 .home-layout .home-header-stack {
