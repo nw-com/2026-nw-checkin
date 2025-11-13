@@ -586,6 +586,8 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
       title: "打卡定位",
       fields: [],
       submitText: "確認",
+      // 確認後不觸發設定頁重新渲染，避免流程被中斷
+      refreshOnSubmit: false,
       onSubmit: async () => {
         resolve({ lat: currentLat, lng: currentLng });
         return true;
@@ -598,7 +600,7 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         mapBox.style.marginTop = "8px";
         body.appendChild(mapBox);
         const map = new maps.Map(mapBox, { center: target, zoom: 16 });
-        const targetMarker = new maps.Marker({ position: target, map, draggable: false, title: targetName || "打卡點" });
+        // 只顯示打卡範圍，不顯示公司/社區標示
         const circle = new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: target, radius: Number(targetRadius) || 100 });
 
         let currentMarker = null;
