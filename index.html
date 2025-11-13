@@ -88,6 +88,14 @@
           <span id="userName" class="user-name">未登入</span>
           <img id="userPhoto" class="user-photo" alt="使用者照片" />
         </div>
+        <!-- 首頁：A/B/C/D/E 堆疊（置於地圖上方） -->
+        <div id="homeHeaderStack" class="home-header-stack hidden" aria-hidden="true">
+          <div class="stack-row row-a"></div>
+          <div class="stack-row row-b"><div id="homeLunar" class="stack-text lunar"></div></div>
+          <div class="stack-row row-c"><div id="homeDate" class="stack-text date"></div></div>
+          <div class="stack-row row-d"><div id="homeTime" class="stack-text time"></div></div>
+          <div class="stack-row row-e"></div>
+        </div>
       </header>
 
       <!-- 頁中上：10% 高，固定於頁首下方、最上層 -->
@@ -97,9 +105,6 @@
 
       <!-- 首頁大圖（僅首頁顯示，置於頁首與頁中之間） -->
       <div id="homeHero" class="home-hero hidden">
-        <div id="homeLunar" class="home-hero-lunar"></div>
-        <div id="homeDate" class="home-hero-date"></div>
-        <div id="homeTime" class="home-hero-time"></div>
         <img id="homeHeroPhoto" class="home-hero-photo" alt="使用者照片" />
       </div>
       <!-- 首頁：地圖覆蓋層（置於頁首上方，透明 10%） -->

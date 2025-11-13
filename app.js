@@ -47,6 +47,8 @@ const userPhotoEl = document.getElementById("userPhoto");
 const subTabsEl = document.getElementById("subTabs");
 const homeHero = document.getElementById("homeHero");
 const homeHeroPhoto = document.getElementById("homeHeroPhoto");
+// 首頁：A/B/C/D/E 堆疊容器
+const homeHeaderStack = document.getElementById("homeHeaderStack");
 // 首頁：地圖覆蓋層
 const homeMapOverlay = document.getElementById("homeMapOverlay");
 const homeMapImg = document.getElementById("homeMapImg");
@@ -2138,6 +2140,8 @@ let firebaseApp, auth, db, functionsApp;
     homeHero?.classList.toggle("hidden", tab !== "home");
     // 首頁：地圖覆蓋層顯示切換
     homeMapOverlay?.classList.toggle("hidden", tab !== "home");
+    // 首頁：A/B/C/D/E 堆疊顯示切換
+    homeHeaderStack?.classList.toggle("hidden", tab !== "home");
     if (tab === "home") { startHomeClock(); } else { stopHomeClock(); }
     renderSubTabs(tab);
   }
