@@ -1016,10 +1016,15 @@ function renderSettingsGeneral() {
       ],
       onSubmit: async (data) => {
         try {
-          if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
-          const payload = { name: data.name || "", coords: data.coords || "", radiusMeters: data.radiusMeters ?? null, createdAt: fns.serverTimestamp() };
-          const docRef = await fns.addDoc(fns.collection(db, "companies"), payload);
-          appState.companies.push({ id: docRef.id, name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters });
+          const payload = { name: data.name || "", coords: data.coords || "", radiusMeters: data.radiusMeters ?? null, createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString() };
+          if (db && fns.addDoc && fns.collection) {
+            const docRef = await fns.addDoc(fns.collection(db, "companies"), payload);
+            appState.companies.push({ id: docRef.id, name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters });
+          } else {
+            appState.companies.push({ id: id(), name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters });
+          }
+          renderSettingsContent("一般");
+          return true;
         } catch (err) {
           alert(`儲存公司失敗：${err?.message || err}`);
           return false;
@@ -1063,11 +1068,15 @@ function renderSettingsGeneral() {
           initial: co,
           onSubmit: async (data) => {
             try {
-              if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
-              await fns.setDoc(fns.doc(db, "companies", cid), { name: data.name || co.name, coords: data.coords || co.coords, radiusMeters: data.radiusMeters ?? co.radiusMeters ?? null, updatedAt: fns.serverTimestamp() }, { merge: true });
-              co.name = data.name || co.name;
-              co.coords = data.coords || co.coords;
-              co.radiusMeters = data.radiusMeters ?? co.radiusMeters;
+              const next = { name: data.name ?? co.name, coords: data.coords ?? co.coords, radiusMeters: data.radiusMeters ?? co.radiusMeters ?? null };
+              if (db && fns.setDoc && fns.doc) {
+                await fns.setDoc(fns.doc(db, "companies", cid), { ...next, updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString() }, { merge: true });
+              }
+              co.name = next.name;
+              co.coords = next.coords;
+              co.radiusMeters = next.radiusMeters;
+              renderSettingsContent("一般");
+              return true;
             } catch (err) {
               alert(`更新公司失敗：${err?.message || err}`);
               return false;
@@ -1096,12 +1105,16 @@ function renderSettingsGeneral() {
           const ok = await confirmAction({ title: "確認刪除公司", text: `確定要刪除公司「${co.name}」嗎？此動作無法復原。`, confirmText: "刪除" });
           if (!ok) return;
           try {
-            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
-            await fns.deleteDoc(fns.doc(db, "companies", cid));
+            if (db && fns.deleteDoc && fns.doc) {
+              await fns.deleteDoc(fns.doc(db, "companies", cid));
+            }
             appState.companies = appState.companies.filter((c) => c.id !== cid);
             renderSettingsContent("一般");
           } catch (err) {
             alert(`刪除公司失敗：${err?.message || err}`);
+            // 雲端刪除失敗時仍執行本地刪除
+            appState.companies = appState.companies.filter((c) => c.id !== cid);
+            renderSettingsContent("一般");
           }
         })();
       }
@@ -1117,9 +1130,15 @@ function renderSettingsGeneral() {
       fields: [{ key: "name", label: "名稱", type: "text" }],
       onSubmit: async (data) => {
         try {
-          if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
-          const docRef = await fns.addDoc(fns.collection(db, "regions"), { name: data.name || "", createdAt: fns.serverTimestamp() });
-          appState.regions.push({ id: docRef.id, name: data.name || "" });
+          const payload = { name: data.name || "", createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString() };
+          if (db && fns.addDoc && fns.collection) {
+            const docRef = await fns.addDoc(fns.collection(db, "regions"), payload);
+            appState.regions.push({ id: docRef.id, name: payload.name });
+          } else {
+            appState.regions.push({ id: id(), name: payload.name });
+          }
+          renderSettingsContent("一般");
+          return true;
         } catch (err) {
           alert(`儲存區域失敗：${err?.message || err}`);
           return false;
@@ -1137,9 +1156,13 @@ function renderSettingsGeneral() {
       if (act === "edit") {
         openModal({ title: "編輯區域", fields: [{ key: "name", label: "名稱", type: "text" }], initial: r, onSubmit: async (d) => {
           try {
-            if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
-            await fns.setDoc(fns.doc(db, "regions", rid), { name: d.name || r.name, updatedAt: fns.serverTimestamp() }, { merge: true });
-            r.name = d.name || r.name;
+            const next = { name: d.name ?? r.name };
+            if (db && fns.setDoc && fns.doc) {
+              await fns.setDoc(fns.doc(db, "regions", rid), { ...next, updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString() }, { merge: true });
+            }
+            r.name = next.name;
+            renderSettingsContent("一般");
+            return true;
           } catch (err) {
             alert(`更新區域失敗：${err?.message || err}`);
             return false;
@@ -1150,12 +1173,16 @@ function renderSettingsGeneral() {
           const ok = await confirmAction({ title: "確認刪除區域", text: `確定要刪除區域「${r.name}」嗎？此動作無法復原。`, confirmText: "刪除" });
           if (!ok) return;
           try {
-            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
-            await fns.deleteDoc(fns.doc(db, "regions", rid));
+            if (db && fns.deleteDoc && fns.doc) {
+              await fns.deleteDoc(fns.doc(db, "regions", rid));
+            }
             appState.regions = appState.regions.filter((x) => x.id !== rid);
             renderSettingsContent("一般");
           } catch (err) {
             alert(`刪除區域失敗：${err?.message || err}`);
+            // 雲端刪除失敗時仍執行本地刪除
+            appState.regions = appState.regions.filter((x) => x.id !== rid);
+            renderSettingsContent("一般");
           }
         })();
       }
@@ -2155,10 +2182,8 @@ let firebaseApp, auth, db, functionsApp;
         const d = docSnap.data() || {};
         items.push({ id: docSnap.id, name: d.name || "", coords: d.coords || "", radiusMeters: d.radiusMeters ?? null });
       });
-      items.forEach((it) => {
-        const idx = appState.companies.findIndex((a) => a.id === it.id);
-        if (idx >= 0) appState.companies[idx] = { ...appState.companies[idx], ...it }; else appState.companies.push(it);
-      });
+      // 以雲端資料覆蓋本地預設項目，避免預設示例持續顯示
+      appState.companies = items;
       if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
     } catch (err) {
       console.warn("載入 Firestore companies 失敗：", err);
@@ -2174,10 +2199,9 @@ let firebaseApp, auth, db, functionsApp;
         const d = docSnap.data() || {};
         items.push({ id: docSnap.id, name: d.name || "" });
       });
-      items.forEach((it) => {
-        const idx = appState.regions.findIndex((a) => a.id === it.id);
-        if (idx >= 0) appState.regions[idx] = { ...appState.regions[idx], ...it }; else appState.regions.push(it);
-      });
+      // 以雲端資料覆蓋本地預設項目，避免預設示例持續顯示造成誤解
+      appState.regions = items;
+      if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
     } catch (err) {
       console.warn("載入 Firestore regions 失敗：", err);
     }
