@@ -242,11 +242,11 @@ if (togglePasswordBtn) {
 }
 
 // ===== 2.2) 設定分頁資料狀態與彈窗工具 =====
-const appState = {
-  companies: [
-    { id: id(), name: "台北公司", coords: "25.041,121.532" },
-    { id: id(), name: "桃園公司", coords: "24.993,121.301" },
-  ],
+  const appState = {
+    companies: [
+      { id: id(), name: "台北公司", coords: "25.041,121.532", radiusMeters: 100 },
+      { id: id(), name: "桃園公司", coords: "24.993,121.301", radiusMeters: 100 },
+    ],
   regions: [
     { id: id(), name: "台北" },
     { id: id(), name: "新北" },
@@ -945,7 +945,7 @@ function renderSettingsGeneral() {
         <table class="table">
           <thead>
             <tr>
-              <th>名稱</th><th>社區數</th><th>幹部數</th><th>人員數</th><th>定位座標</th><th>操作</th>
+              <th>名稱</th><th>社區數</th><th>幹部數</th><th>人員數</th><th>定位座標</th><th>打卡半徑(公尺)</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -957,6 +957,7 @@ function renderSettingsGeneral() {
                 <td>${s.leaderCount}</td>
                 <td>${s.staffCount}</td>
                 <td>${co.coords || ""}</td>
+                <td>${co.radiusMeters ?? ""}</td>
                 <td class="cell-actions">
                   <button class="btn btn-sm" data-act="edit">編輯</button>
                   <button class="btn btn-sm" data-act="del">刪除</button>
@@ -1011,16 +1012,35 @@ function renderSettingsGeneral() {
       fields: [
         { key: "name", label: "名稱", type: "text" },
         { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
+        { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number", placeholder: "100" },
       ],
       onSubmit: async (data) => {
         try {
           if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
-          const docRef = await fns.addDoc(fns.collection(db, "companies"), { name: data.name || "", coords: data.coords || "", createdAt: fns.serverTimestamp() });
-          appState.companies.push({ id: docRef.id, name: data.name || "", coords: data.coords || "" });
+          const payload = { name: data.name || "", coords: data.coords || "", radiusMeters: data.radiusMeters ?? null, createdAt: fns.serverTimestamp() };
+          const docRef = await fns.addDoc(fns.collection(db, "companies"), payload);
+          appState.companies.push({ id: docRef.id, name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters });
         } catch (err) {
           alert(`儲存公司失敗：${err?.message || err}`);
           return false;
         }
+      },
+      afterRender: async ({ body }) => {
+        const coordsInput = body.querySelector('[data-key="coords"]');
+        const radiusInput = body.querySelector('[data-key="radiusMeters"]');
+        const coordsRow = coordsInput?.parentElement;
+        if (!coordsRow || !coordsInput) return;
+        const btn = document.createElement("button");
+        btn.className = "btn";
+        btn.textContent = "用地圖選擇";
+        attachPressInteractions(btn);
+        btn.addEventListener("click", async () => {
+          const initialR = Number(radiusInput?.value) || 100;
+          const result = await openMapPicker({ initialAddress: "", initialCoords: coordsInput.value, initialRadius: initialR });
+          coordsInput.value = result.coords || coordsInput.value;
+          if (radiusInput && result.radiusMeters != null) radiusInput.value = String(result.radiusMeters);
+        });
+        coordsRow.appendChild(btn);
       },
     });
   });
@@ -1038,18 +1058,37 @@ function renderSettingsGeneral() {
           fields: [
             { key: "name", label: "名稱", type: "text" },
             { key: "coords", label: "定位座標", type: "text" },
+            { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
           ],
           initial: co,
           onSubmit: async (data) => {
             try {
               if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
-              await fns.setDoc(fns.doc(db, "companies", cid), { name: data.name || co.name, coords: data.coords || co.coords, updatedAt: fns.serverTimestamp() }, { merge: true });
+              await fns.setDoc(fns.doc(db, "companies", cid), { name: data.name || co.name, coords: data.coords || co.coords, radiusMeters: data.radiusMeters ?? co.radiusMeters ?? null, updatedAt: fns.serverTimestamp() }, { merge: true });
               co.name = data.name || co.name;
               co.coords = data.coords || co.coords;
+              co.radiusMeters = data.radiusMeters ?? co.radiusMeters;
             } catch (err) {
               alert(`更新公司失敗：${err?.message || err}`);
               return false;
             }
+          },
+          afterRender: async ({ body }) => {
+            const coordsInput = body.querySelector('[data-key="coords"]');
+            const radiusInput = body.querySelector('[data-key="radiusMeters"]');
+            const coordsRow = coordsInput?.parentElement;
+            if (!coordsRow || !coordsInput) return;
+            const btn = document.createElement("button");
+            btn.className = "btn";
+            btn.textContent = "用地圖選擇";
+            attachPressInteractions(btn);
+            btn.addEventListener("click", async () => {
+              const initialR = Number(radiusInput?.value) || 100;
+              const result = await openMapPicker({ initialAddress: "", initialCoords: coordsInput.value, initialRadius: initialR });
+              coordsInput.value = result.coords || coordsInput.value;
+              if (radiusInput && result.radiusMeters != null) radiusInput.value = String(result.radiusMeters);
+            });
+            coordsRow.appendChild(btn);
           },
         });
       } else if (act === "del") {
@@ -2114,12 +2153,13 @@ let firebaseApp, auth, db, functionsApp;
       const items = [];
       snap.forEach((docSnap) => {
         const d = docSnap.data() || {};
-        items.push({ id: docSnap.id, name: d.name || "", coords: d.coords || "" });
+        items.push({ id: docSnap.id, name: d.name || "", coords: d.coords || "", radiusMeters: d.radiusMeters ?? null });
       });
       items.forEach((it) => {
         const idx = appState.companies.findIndex((a) => a.id === it.id);
         if (idx >= 0) appState.companies[idx] = { ...appState.companies[idx], ...it }; else appState.companies.push(it);
       });
+      if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
     } catch (err) {
       console.warn("載入 Firestore companies 失敗：", err);
     }
@@ -2483,6 +2523,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
             name: item.name || "",
             coords: item.coords || "",
             address: item.address || "",
+            radiusMeters: item.radiusMeters ?? null,
           });
           return true;
         },
