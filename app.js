@@ -264,7 +264,7 @@ function id() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmit, message, afterRender }) {
+function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmit, message, afterRender, refreshOnSubmit = true }) {
   if (!modalRoot) return;
   modalRoot.classList.remove("hidden");
   modalRoot.innerHTML = "";
@@ -417,7 +417,7 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
     // 若 onSubmit 明確回傳 false，視為失敗不關閉視窗；成功則關閉並回到目前子分頁列表
     if (ok !== false) {
       closeModal();
-      if (activeMainTab === "settings" && activeSubTab) {
+      if (refreshOnSubmit && activeMainTab === "settings" && activeSubTab) {
         renderSettingsContent(activeSubTab);
       }
     }
@@ -527,17 +527,18 @@ function openMapPicker({ initialAddress = "", initialCoords = "", initialRadius 
       { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number", placeholder: "100" },
     ];
     const initial = { address: initialAddress, coords: `${start.lat},${start.lng}`, radiusMeters: initialRadius };
-    openModal({
-      title: "地圖編輯",
-      fields,
-      initial,
-      submitText: "套用",
-      onSubmit: async (data) => resolve(data),
-      afterRender: async ({ body }) => {
-        const maps = await ensureGoogleMaps();
-        const mapBox = document.createElement("div");
-        mapBox.style.width = "100%";
-        mapBox.style.height = "320px";
+  openModal({
+    title: "地圖編輯",
+    fields,
+    initial,
+    submitText: "套用",
+    onSubmit: async (data) => resolve(data),
+    refreshOnSubmit: false,
+    afterRender: async ({ body }) => {
+      const maps = await ensureGoogleMaps();
+      const mapBox = document.createElement("div");
+      mapBox.style.width = "100%";
+      mapBox.style.height = "320px";
         mapBox.style.marginTop = "8px";
         body.appendChild(mapBox);
         const map = new maps.Map(mapBox, { center: start, zoom: 16 });
@@ -650,10 +651,11 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
 
 function companyStats(companyId) {
   const communityCount = appState.communities.filter((c) => c.companyId === companyId).length;
-  const staff = appState.accounts.filter((a) => a.companyId === companyId);
-  const staffCount = staff.length;
-  const leaderRoles = new Set(["管理層", "高階主管", "初階主管"]);
-  const leaderCount = staff.filter((a) => leaderRoles.has(a.role)).length;
+  const accountsInCompany = appState.accounts.filter((a) => a.companyId === companyId);
+  const leaderRoles = new Set(["系統管理員", "管理層", "高階主管", "初階主管", "行政"]);
+  const staffRoles = new Set(["一般", "勤務"]);
+  const leaderCount = accountsInCompany.filter((a) => leaderRoles.has(a.role)).length;
+  const staffCount = accountsInCompany.filter((a) => staffRoles.has(a.role)).length;
   return { communityCount, leaderCount, staffCount };
 }
 
@@ -664,6 +666,172 @@ function confirmAction({ title = "確認刪除", text = "確定要刪除？此�
     const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
     if (cancelBtn) cancelBtn.addEventListener('click', () => { resolve(false); });
   });
+}
+
+// 載入 XLSX（SheetJS）
+async function ensureXLSX() {
+  if (window.XLSX) return;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("載入 XLSX 失敗"));
+    document.head.appendChild(s);
+  });
+}
+
+async function parseXLSXFile(file) {
+  await ensureXLSX();
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheetName = wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  return rows;
+}
+
+async function exportCommunitiesToXLSX() {
+  await ensureXLSX();
+  const data = appState.communities.map((c) => {
+    const companyName = appState.companies.find((co) => co.id === c.companyId)?.name || "";
+    const regionName = appState.regions.find((r) => r.id === c.regionId)?.name || "";
+    return {
+      公司: companyName,
+      社區編號: c.code || "",
+      社區名稱: c.name || "",
+      地址: c.address || "",
+      區域: regionName,
+      定位座標: c.coords || "",
+      "有效打卡範圍半徑(公尺)": c.radiusMeters ?? "",
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(data, { skipHeader: false });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "communities");
+  XLSX.writeFile(wb, "communities.xlsx");
+}
+
+async function importCommunitiesFromXLSX(file) {
+  const rows = await parseXLSXFile(file);
+  let success = 0, failed = 0;
+  for (const r of rows) {
+    try {
+      const companyName = r["公司"] || "";
+      const regionName = r["區域"] || "";
+      const companyId = appState.companies.find((co) => (co.name || "") === companyName)?.id || null;
+      const regionId = appState.regions.find((rg) => (rg.name || "") === regionName)?.id || null;
+      const payload = {
+        code: r["社區編號"] || "",
+        name: r["社區名稱"] || "",
+        address: r["地址"] || "",
+        companyId,
+        regionId,
+        coords: r["定位座標"] || "",
+        radiusMeters: r["有效打卡範圍半徑(公尺)"] !== "" ? Number(r["有效打卡範圍半徑(公尺)"]) : null,
+        createdAt: fns?.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+      };
+      let idNew = null;
+      if (db && fns?.addDoc && fns?.collection) {
+        const docRef = await fns.addDoc(fns.collection(db, "communities"), payload);
+        idNew = docRef.id;
+      } else {
+        idNew = id();
+      }
+      appState.communities.push({ id: idNew, ...payload });
+      success++;
+    } catch (err) {
+      console.warn("匯入社區失敗", err);
+      failed++;
+    }
+  }
+  alert(`社區匯入完成：成功 ${success} 筆，失敗 ${failed} 筆`);
+  renderSettingsContent("社區");
+}
+
+async function exportAccountsToXLSX() {
+  await ensureXLSX();
+  const data = appState.accounts.map((a) => {
+    const companyName = appState.companies.find((c) => c.id === a.companyId)?.name || "";
+    const service = Array.isArray(a.serviceCommunities) ? a.serviceCommunities.map((id) => appState.communities.find((x) => x.id === id)?.name || id).join("、") : "";
+    const lic = Array.isArray(a.licenses) ? a.licenses.map((x) => appState.licenses.find((l) => l.id === x)?.name || x).join("、") : "";
+    return {
+      中文姓名: a.name || "",
+      職稱: a.title || "",
+      電子郵件: a.email || "",
+      手機號碼: a.phone || "",
+      角色: a.role || "",
+      公司: companyName,
+      服務社區: service,
+      狀況: a.status || "",
+      相關證照: lic,
+      緊急聯絡人: a.emergencyName || "",
+      緊急聯絡人關係: a.emergencyRelation || "",
+      緊急聯絡人手機號碼: a.emergencyPhone || "",
+      血型: a.bloodType || "",
+      出生年月日: a.birthdate || "",
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(data, { skipHeader: false });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "accounts");
+  XLSX.writeFile(wb, "accounts.xlsx");
+}
+
+async function importAccountsFromXLSX(file) {
+  const rows = await parseXLSXFile(file);
+  let success = 0, failed = 0;
+  const splitNames = (s) => (s || "").split(/[、,]/).map((x) => x.trim()).filter(Boolean);
+  for (const r of rows) {
+    try {
+      const companyName = r["公司"] || "";
+      const companyId = appState.companies.find((co) => (co.name || "") === companyName)?.id || null;
+      const serviceNames = splitNames(r["服務社區"] || "");
+      const serviceIds = serviceNames.map((nm) => appState.communities.find((x) => (x.name || "") === nm)?.id).filter(Boolean);
+      const licNames = splitNames(r["相關證照"] || "");
+      const licIds = licNames.map((nm) => appState.licenses.find((l) => (l.name || "") === nm)?.id).filter(Boolean);
+      const email = r["電子郵件"] || "";
+      const payload = {
+        photoUrl: "",
+        name: r["中文姓名"] || "",
+        title: r["職稱"] || "",
+        email,
+        phone: r["手機號碼"] || "",
+        emergencyName: r["緊急聯絡人"] || "",
+        emergencyRelation: r["緊急聯絡人關係"] || "",
+        emergencyPhone: r["緊急聯絡人手機號碼"] || "",
+        bloodType: r["血型"] || "",
+        birthdate: r["出生年月日"] || "",
+        licenses: licIds,
+        role: r["角色"] || "一般",
+        companyId,
+        serviceCommunities: serviceIds,
+        pagePermissions: [],
+        status: r["狀況"] || "在職",
+        updatedAt: fns?.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+      };
+      // 以 Email 去重：存在則更新，否則新增
+      let targetId = appState.accounts.find((a) => a.email && email && a.email.toLowerCase() === email.toLowerCase())?.id || null;
+      if (db && fns?.setDoc && fns?.doc && targetId) {
+        await fns.setDoc(fns.doc(db, "users", targetId), payload, { merge: true });
+        const idx = appState.accounts.findIndex((a) => a.id === targetId);
+        if (idx >= 0) appState.accounts[idx] = { ...appState.accounts[idx], ...payload };
+      } else {
+        if (db && fns?.addDoc && fns?.collection) {
+          const docRef = await fns.addDoc(fns.collection(db, "users"), payload);
+          targetId = docRef.id;
+        } else {
+          targetId = id();
+        }
+        appState.accounts.push({ id: targetId, ...payload });
+      }
+      success++;
+    } catch (err) {
+      console.warn("匯入帳號失敗", err);
+      failed++;
+    }
+  }
+  alert(`帳號匯入完成：成功 ${success} 筆，失敗 ${failed} 筆`);
+  renderSettingsContent("帳號");
 }
 
 // 登入頁面「帳號申請」
@@ -1040,10 +1208,57 @@ function renderSettingsGeneral() {
         btn.textContent = "用地圖選擇";
         attachPressInteractions(btn);
         btn.addEventListener("click", async () => {
-          const initialR = Number(radiusInput?.value) || 100;
-          const result = await openMapPicker({ initialAddress: "", initialCoords: coordsInput.value, initialRadius: initialR });
-          coordsInput.value = result.coords || coordsInput.value;
-          if (radiusInput && result.radiusMeters != null) radiusInput.value = String(result.radiusMeters);
+          const maps = await ensureGoogleMaps();
+          let inline = coordsRow.querySelector(".inline-map-picker");
+          if (inline) { inline.classList.toggle("hidden"); return; }
+          inline = document.createElement("div");
+          inline.className = "inline-map-picker";
+          inline.style.marginTop = "8px";
+          const mapBox = document.createElement("div");
+          mapBox.style.width = "100%";
+          mapBox.style.height = "280px";
+          inline.appendChild(mapBox);
+          const controls = document.createElement("div");
+          controls.style.display = "flex";
+          controls.style.gap = "8px";
+          controls.style.marginTop = "8px";
+          const addrInput = document.createElement("input");
+          addrInput.className = "input";
+          addrInput.placeholder = "輸入地址以定位";
+          controls.appendChild(addrInput);
+          const btnApply = document.createElement("button");
+          btnApply.className = "btn btn-primary";
+          btnApply.textContent = "套用";
+          attachPressInteractions(btnApply);
+          controls.appendChild(btnApply);
+          inline.appendChild(controls);
+          coordsRow.appendChild(inline);
+
+          const parse = (str) => {
+            const [la, ln] = String(str || "").split(",").map((s) => s.trim());
+            const lat = parseFloat(la); const lng = parseFloat(ln);
+            if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+            return { lat: 25.041, lng: 121.532 };
+          };
+          const start = parse(coordsInput.value);
+          const map = new maps.Map(mapBox, { center: start, zoom: 16 });
+          const marker = new maps.Marker({ position: start, map, draggable: true });
+          const circle = new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: start, radius: Number(radiusInput?.value) || 100 });
+          const updateFromLatLng = async (lat, lng) => {
+            coordsInput.value = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+            marker.setPosition({ lat, lng });
+            circle.setCenter({ lat, lng });
+            try { const res = await reverseGeocode(lat, lng); addrInput.value = res.formatted_address || addrInput.value; } catch {}
+          };
+          marker.addListener("dragend", (ev) => { const p = ev.latLng; updateFromLatLng(p.lat(), p.lng()); });
+          radiusInput?.addEventListener("input", () => { const r = Number(radiusInput.value) || 100; circle.setRadius(r); });
+          addrInput.addEventListener("change", async () => {
+            const v = addrInput.value?.trim(); if (!v) return;
+            try { const res = await geocodeAddress(v); const loc = res.geometry.location; const pos = { lat: loc.lat(), lng: loc.lng() }; map.setCenter(pos); marker.setPosition(pos); circle.setCenter(pos); coordsInput.value = `${pos.lat.toFixed(6)},${pos.lng.toFixed(6)}`; } catch {}
+          });
+          btnApply.addEventListener("click", () => {
+            // 套用僅更新欄位，不關閉彈窗，讓使用者再按儲存
+          });
         });
         coordsRow.appendChild(btn);
       },
@@ -1092,10 +1307,57 @@ function renderSettingsGeneral() {
             btn.textContent = "用地圖選擇";
             attachPressInteractions(btn);
             btn.addEventListener("click", async () => {
-              const initialR = Number(radiusInput?.value) || 100;
-              const result = await openMapPicker({ initialAddress: "", initialCoords: coordsInput.value, initialRadius: initialR });
-              coordsInput.value = result.coords || coordsInput.value;
-              if (radiusInput && result.radiusMeters != null) radiusInput.value = String(result.radiusMeters);
+              const maps = await ensureGoogleMaps();
+              let inline = coordsRow.querySelector(".inline-map-picker");
+              if (inline) { inline.classList.toggle("hidden"); return; }
+              inline = document.createElement("div");
+              inline.className = "inline-map-picker";
+              inline.style.marginTop = "8px";
+              const mapBox = document.createElement("div");
+              mapBox.style.width = "100%";
+              mapBox.style.height = "280px";
+              inline.appendChild(mapBox);
+              const controls = document.createElement("div");
+              controls.style.display = "flex";
+              controls.style.gap = "8px";
+              controls.style.marginTop = "8px";
+              const addrInput = document.createElement("input");
+              addrInput.className = "input";
+              addrInput.placeholder = "輸入地址以定位";
+              controls.appendChild(addrInput);
+              const btnApply = document.createElement("button");
+              btnApply.className = "btn btn-primary";
+              btnApply.textContent = "套用";
+              attachPressInteractions(btnApply);
+              controls.appendChild(btnApply);
+              inline.appendChild(controls);
+              coordsRow.appendChild(inline);
+
+              const parse = (str) => {
+                const [la, ln] = String(str || "").split(",").map((s) => s.trim());
+                const lat = parseFloat(la); const lng = parseFloat(ln);
+                if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+                return { lat: 25.041, lng: 121.532 };
+              };
+              const start = parse(coordsInput.value);
+              const map = new maps.Map(mapBox, { center: start, zoom: 16 });
+              const marker = new maps.Marker({ position: start, map, draggable: true });
+              const circle = new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: start, radius: Number(radiusInput?.value) || 100 });
+              const updateFromLatLng = async (lat, lng) => {
+                coordsInput.value = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+                marker.setPosition({ lat, lng });
+                circle.setCenter({ lat, lng });
+                try { const res = await reverseGeocode(lat, lng); addrInput.value = res.formatted_address || addrInput.value; } catch {}
+              };
+              marker.addListener("dragend", (ev) => { const p = ev.latLng; updateFromLatLng(p.lat(), p.lng()); });
+              radiusInput?.addEventListener("input", () => { const r = Number(radiusInput.value) || 100; circle.setRadius(r); });
+              addrInput.addEventListener("change", async () => {
+                const v = addrInput.value?.trim(); if (!v) return;
+                try { const res = await geocodeAddress(v); const loc = res.geometry.location; const pos = { lat: loc.lat(), lng: loc.lng() }; map.setCenter(pos); marker.setPosition(pos); circle.setCenter(pos); coordsInput.value = `${pos.lat.toFixed(6)},${pos.lng.toFixed(6)}`; } catch {}
+              });
+              btnApply.addEventListener("click", () => {
+                // 套用僅更新欄位，不關閉彈窗，讓使用者再按儲存
+              });
             });
             coordsRow.appendChild(btn);
           },
@@ -1247,19 +1509,41 @@ function renderSettingsGeneral() {
 function renderSettingsCommunities() {
   const rows = appState.communities.map((c) => {
     const regionName = appState.regions.find((r) => r.id === c.regionId)?.name || "";
-    return `<tr data-id="${c.id}"><td>${c.code || ""}</td><td>${c.name || ""}</td><td>${c.address || ""}</td><td>${regionName}</td><td>${c.coords || ""}</td><td>${c.radiusMeters ?? ""}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td></tr>`;
+    const companyName = appState.companies.find((co) => co.id === c.companyId)?.name || "";
+    return `<tr data-id="${c.id}"><td>${companyName}</td><td>${c.code || ""}</td><td>${c.name || ""}</td><td>${c.address || ""}</td><td>${regionName}</td><td>${c.coords || ""}</td><td>${c.radiusMeters ?? ""}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td></tr>`;
   }).join("");
 
   settingsContent.innerHTML = `
     <div class="block" id="block-communities">
-      <div class="block-header"><span class="block-title">社區列表</span><div class="block-actions"><button id="btnAddCommunity" class="btn">新增</button></div></div>
+      <div class="block-header"><span class="block-title">社區列表</span><div class="block-actions"><button id="btnExportCommunities" class="btn">匯出.xlsx</button><button id="btnImportCommunities" class="btn">匯入.xlsx</button><button id="btnAddCommunity" class="btn">新增</button></div></div>
       <div class="table-wrapper">
         <table class="table">
-          <thead><tr><th>社區編號</th><th>社區名稱</th><th>地址</th><th>區域</th><th>定位座標</th><th>有效打卡範圍半徑(公尺)</th><th>操作</th></tr></thead>
+          <thead><tr><th>公司</th><th>社區編號</th><th>社區名稱</th><th>地址</th><th>區域</th><th>定位座標</th><th>有效打卡範圍半徑(公尺)</th><th>操作</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
     </div>`;
+
+  // 匯出/匯入事件
+  const btnExportC = document.getElementById("btnExportCommunities");
+  const btnImportC = document.getElementById("btnImportCommunities");
+  [btnExportC, btnImportC].forEach((b) => b && attachPressInteractions(b));
+  btnExportC?.addEventListener("click", () => exportCommunitiesToXLSX());
+  btnImportC?.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx,.xls";
+    input.addEventListener("change", async () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      try {
+        await importCommunitiesFromXLSX(f);
+      } catch (err) {
+        alert(`匯入社區失敗：${err?.message || err}`);
+      }
+    });
+    input.click();
+  });
 
   const btnAdd = document.getElementById("btnAddCommunity");
   attachPressInteractions(btnAdd);
@@ -1270,6 +1554,7 @@ function renderSettingsCommunities() {
         { key: "code", label: "社區編號", type: "text" },
         { key: "name", label: "社區名稱", type: "text" },
         { key: "address", label: "地址", type: "text" },
+        { key: "companyId", label: "所屬公司", type: "select", options: optionList(appState.companies) },
         { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
         { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
         { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
@@ -1277,7 +1562,7 @@ function renderSettingsCommunities() {
       onSubmit: async (d) => {
         try {
           if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
-          const payload = { code: d.code || "", name: d.name || "", address: d.address || "", regionId: d.regionId || null, coords: d.coords || "", radiusMeters: d.radiusMeters ?? null, createdAt: fns.serverTimestamp() };
+          const payload = { code: d.code || "", name: d.name || "", address: d.address || "", companyId: d.companyId || null, regionId: d.regionId || null, coords: d.coords || "", radiusMeters: d.radiusMeters ?? null, createdAt: fns.serverTimestamp() };
           const docRef = await fns.addDoc(fns.collection(db, "communities"), payload);
           appState.communities.push({ id: docRef.id, ...payload });
         } catch (err) {
@@ -1349,6 +1634,7 @@ function renderSettingsCommunities() {
             { key: "code", label: "社區編號", type: "text" },
             { key: "name", label: "社區名稱", type: "text" },
             { key: "address", label: "地址", type: "text" },
+            { key: "companyId", label: "所屬公司", type: "select", options: optionList(appState.companies) },
             { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
             { key: "coords", label: "定位座標", type: "text" },
             { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
@@ -1360,6 +1646,7 @@ function renderSettingsCommunities() {
               const payload = {
                 code: d.code ?? item.code ?? "",
                 name: d.name ?? item.name ?? "",
+                companyId: d.companyId ?? item.companyId ?? null,
                 regionId: d.regionId ?? item.regionId ?? null,
                 coords: d.coords ?? item.coords ?? "",
                 address: d.address ?? item.address ?? "",
@@ -1478,7 +1765,7 @@ function renderSettingsAccounts() {
 
   settingsContent.innerHTML = `
     <div class="block" id="block-accounts">
-      <div class="block-header"><span class="block-title">帳號列表</span><div class="block-actions"><button id="btnAddAccount" class="btn">新增</button></div></div>
+      <div class="block-header"><span class="block-title">帳號列表</span><div class="block-actions"><button id="btnExportAccounts" class="btn">匯出.xlsx</button><button id="btnImportAccounts" class="btn">匯入.xlsx</button><button id="btnAddAccount" class="btn">新增</button></div></div>
       <div class="table-wrapper">
         <table class="table">
           <thead>
@@ -1504,6 +1791,31 @@ function renderSettingsAccounts() {
         </table>
       </div>
     </div>`;
+
+  // 帳號匯出/匯入事件
+  const btnExportA = document.getElementById("btnExportAccounts");
+  const btnImportA = document.getElementById("btnImportAccounts");
+  [btnExportA, btnImportA].forEach((b) => b && attachPressInteractions(b));
+  btnExportA?.addEventListener("click", () => exportAccountsToXLSX());
+  btnImportA?.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".xlsx,.xls";
+    input.addEventListener("change", async () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      try {
+        if (appState.currentUserRole !== "系統管理員") {
+          alert("權限不足：只有系統管理員可以匯入帳號。");
+          return;
+        }
+        await importAccountsFromXLSX(f);
+      } catch (err) {
+        alert(`匯入帳號失敗：${err?.message || err}`);
+      }
+    });
+    input.click();
+  });
 
   const btnAdd = document.getElementById("btnAddAccount");
   attachPressInteractions(btnAdd);
@@ -2236,6 +2548,7 @@ let firebaseApp, auth, db, functionsApp;
           id: docSnap.id,
           code: d.code || "",
           name: d.name || "",
+          companyId: d.companyId || null,
           regionId: d.regionId || null,
           coords: d.coords || "",
           address: d.address || "",
