@@ -61,6 +61,7 @@ const homeHeaderNameEl = document.getElementById("homeHeaderName");
 const homeLunarEl = document.getElementById("homeLunar");
 let homeClockTimer = null;
 let lastCoords = null;
+let geoRefreshTimer = null;
 
 function updateHomeMap() {
   if (!homeMapImg || !lastCoords) return;
@@ -130,7 +131,7 @@ function getLunarString(d) {
 function updateHomeClockOnce() {
   const now = nowInTZ('Asia/Taipei');
   if (homeTimeEl) homeTimeEl.textContent = `${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`;
-  if (homeDateEl) homeDateEl.textContent = `${formatDateYYYYMMDD(now)}`;
+  if (homeDateEl) homeDateEl.textContent = `${formatDateYYYYMMDD(now)} (${weekdayZH(now)})`;
 }
 function startHomeClock() {
   stopHomeClock();
@@ -140,6 +141,34 @@ function startHomeClock() {
 function stopHomeClock() {
   if (homeClockTimer) { clearInterval(homeClockTimer); homeClockTimer = null; }
 }
+
+// 週幾（中）
+function weekdayZH(d) {
+  const days = "日一二三四五六";
+  return days[d.getDay()] || "";
+}
+
+// 每 30 秒定位更新（僅首頁且頁籤可見時）
+function startGeoRefresh() {
+  stopGeoRefresh();
+  geoRefreshTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible' || activeMainTab !== 'home') return;
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        lastCoords = pos.coords;
+        updateHomeMap();
+      }, (err) => {
+        // 忽略錯誤，保持上一筆座標
+      }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 15000 });
+    }
+  }, 30000);
+}
+function stopGeoRefresh() {
+  if (geoRefreshTimer) { clearInterval(geoRefreshTimer); geoRefreshTimer = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && activeMainTab === 'home') startGeoRefresh(); else stopGeoRefresh();
+});
 
 const homeSection = document.getElementById("homeSection");
 const checkinSection = document.getElementById("checkinSection");
@@ -1899,8 +1928,9 @@ let firebaseApp, auth, db, functionsApp;
       }
       if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
 
-        // 啟用定位顯示
+      // 啟用定位顯示
         initGeolocation();
+        startGeoRefresh();
 
         // 綁定打卡
         checkinBtn.addEventListener("click", () => doCheckin(user, role));
@@ -1913,6 +1943,7 @@ let firebaseApp, auth, db, functionsApp;
         userPhotoEl.removeAttribute("src");
         // 登出時恢復顯示所有分頁
         resetPagePermissions();
+        stopGeoRefresh();
       }
     });
   } catch (err) {
@@ -2148,7 +2179,7 @@ let firebaseApp, auth, db, functionsApp;
     homeMapOverlay?.classList.toggle("hidden", tab !== "home");
     // 首頁：A/B/C/D/E 堆疊顯示切換
     homeHeaderStack?.classList.toggle("hidden", tab !== "home");
-    if (tab === "home") { startHomeClock(); } else { stopHomeClock(); }
+    if (tab === "home") { startHomeClock(); startGeoRefresh(); } else { stopHomeClock(); stopGeoRefresh(); }
     renderSubTabs(tab);
   }
 

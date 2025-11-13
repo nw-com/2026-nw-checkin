@@ -261,8 +261,7 @@ button[disabled] { cursor: not-allowed; }
 /* Header內容靠上 */
 .home-layout .app-header .header-left { position: relative; z-index: 2; display: flex; align-items: center; padding: 0 14px; }
 .home-layout .app-header .header-right { display: none; }
-.home-layout .app-header .header-left,
-.home-layout .app-header .header-right { height: 8vh; display: flex; align-items: center; }
+.home-layout .app-header .header-left { height: 8vh; display: flex; align-items: center; }
 
 /* 首頁：A/B/C/D/E 堆疊容器（置於地圖上方） */
 .home-layout .home-header-stack {
