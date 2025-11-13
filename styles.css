@@ -194,7 +194,7 @@ button[disabled] { cursor: not-allowed; }
   position: fixed; top: 0; left: 0; right: 0;
   /* 使用 Grid 切為 A/B/C/D/E 五列 */
   display: grid;
-  grid-template-rows: 5vh 5vh 5vh 9vh 16vh;
+  grid-template-rows: 5vh 5vh 7vh 7vh 16vh;
   background: #CC0000;
 }
 .home-layout .app-subheader {
@@ -209,6 +209,65 @@ button[disabled] { cursor: not-allowed; }
   padding-top: calc(40vh + 12px);
   padding-bottom: calc(8vh + 12px);
   min-height: 52vh;
+}
+
+/* 首頁：頁中 F–K（總高 50vh） */
+.home-layout .home-mid-stack {
+  height: 50vh;
+  display: grid;
+  grid-template-rows: 8vh 8vh 8vh 8vh 8vh 10vh;
+  align-items: stretch;
+  gap: 8px;
+}
+.home-layout .home-mid-stack .mid-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2vh;
+}
+.home-layout .home-mid-stack .status-text { font-size: 4vh; font-weight: 400; }
+/* 按鈕高 6vh，字體 4vh */
+.home-layout .home-mid-stack .btn {
+  height: 6vh;
+  padding: 0 2vh;
+  font-size: 4vh;
+  border-radius: 2vh;
+}
+/* 顏色方案 */
+.btn-green { background: #0f9d58; }
+.btn-red { background: #d93025; }
+.btn-blue { background: #1e88e5; }
+.btn-darkgreen { background: #0b8043; }
+.btn-orange { background: #f57c00; }
+.btn-purple { background: #8e24aa; }
+
+/* 狀態顏色對應（文字與大照片邊框） */
+body.status-work #homeStatus { color: #0f9d58; }
+body.status-off #homeStatus { color: #d93025; }
+body.status-out #homeStatus { color: #1e88e5; }
+body.status-arrive #homeStatus { color: #1e88e5; }
+body.status-leave #homeStatus { color: #1e88e5; }
+body.status-return #homeStatus { color: #0b8043; }
+body.status-leave-request #homeStatus { color: #f57c00; }
+
+/* 大照片邊框顏色（依狀態）與動畫效果 */
+.home-layout .home-hero-photo {
+  border: 6px solid #ffffff;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+  animation: photoPulse 2400ms infinite ease-in-out;
+}
+body.status-work .home-hero-photo { border-color: #0f9d58; box-shadow: 0 0 20px rgba(15,157,88,0.35); }
+body.status-off .home-hero-photo { border-color: #d93025; box-shadow: 0 0 20px rgba(217,48,37,0.35); }
+body.status-out .home-hero-photo { border-color: #1e88e5; box-shadow: 0 0 20px rgba(30,136,229,0.35); }
+body.status-arrive .home-hero-photo { border-color: #1e88e5; box-shadow: 0 0 20px rgba(30,136,229,0.35); }
+body.status-leave .home-hero-photo { border-color: #1e88e5; box-shadow: 0 0 20px rgba(30,136,229,0.35); }
+body.status-return .home-hero-photo { border-color: #0b8043; box-shadow: 0 0 20px rgba(11,128,67,0.35); }
+body.status-leave-request .home-hero-photo { border-color: #f57c00; box-shadow: 0 0 20px rgba(245,124,0,0.35); }
+
+@keyframes photoPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.01); }
+  100% { transform: scale(1); }
 }
 
 /* 首頁大圖：50vw，水平置中，介於頁首與頁中之間（疊加顯示） */
@@ -256,9 +315,9 @@ button[disabled] { cursor: not-allowed; }
 /* B 列：西元日期（細體，列高 5vh 的 60%） */
 .home-layout .home-header-stack .date { font-size: 4vh; font-weight: 300; }
 /* C 列：時間（粗體，列高 5vh 的 80%） */
-.home-layout .home-header-stack .time { font-size: 5vh; font-weight: 700; letter-spacing: 0.5px; }
+.home-layout .home-header-stack .time { font-size: 7vh; font-weight: 700; letter-spacing: 0.5px; }
 /* D 列：登入者姓名（細體，列高 9vh 的 60%） */
-.home-layout .home-header-stack .name { font-size: 3.6vh; font-weight: 300; }
+.home-layout .home-header-stack .name { font-size: 4vh; font-weight: 300; }
 
 /* Header內容靠上 */
 .home-layout .app-header .header-left { display: none; }
@@ -269,13 +328,15 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .home-header-stack {
   position: absolute; inset: 0; height: 40vh; pointer-events: none; z-index: 1200;
   display: grid;
-  grid-template-rows: 5vh 5vh 5vh 9vh 16vh;
+  grid-template-rows: 5vh 5vh 7vh 7vh 16vh;
 }
 /* 預設各列內容靠該列最上緣 */
 .home-layout .home-header-stack .stack-row { display: grid; place-items: start center; }
 /* A/E 列置中對齊 */
 .home-layout .home-header-stack .row-a,
 .home-layout .home-header-stack .row-e { place-items: center; }
+/* D 列垂直置中 */
+.home-layout .home-header-stack .row-d { place-items: center; }
 .home-layout .home-header-stack .stack-text { color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
 .home-layout .home-header-stack .stack-text.lunar { font-weight: 300; }
 .home-layout .home-header-stack .stack-text.date { font-weight: 300; }

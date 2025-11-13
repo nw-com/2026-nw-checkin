@@ -62,6 +62,17 @@ const homeLunarEl = document.getElementById("homeLunar");
 let homeClockTimer = null;
 let lastCoords = null;
 let geoRefreshTimer = null;
+// 首頁：頁中 F–K（狀態與操作）
+const homeMidStack = document.getElementById("homeMidStack");
+const homeStatusEl = document.getElementById("homeStatus");
+const btnStart = document.getElementById("btnStart");
+const btnEnd = document.getElementById("btnEnd");
+const btnOut = document.getElementById("btnOut");
+const btnArrive = document.getElementById("btnArrive");
+const btnReturn = document.getElementById("btnReturn");
+const btnLeave = document.getElementById("btnLeave");
+const btnLeaveRequest = document.getElementById("btnLeaveRequest");
+const btnMakeup = document.getElementById("btnMakeup");
 
 function updateHomeMap() {
   if (!homeMapImg || !lastCoords) return;
@@ -2321,3 +2332,32 @@ const SUB_TABS = {
 
 let activeMainTab = "home";
 let activeSubTab = null;
+// ===== 首頁狀態切換（F–K） =====
+function setHomeStatus(key, label) {
+  const classes = [
+    "status-work",
+    "status-off",
+    "status-out",
+    "status-arrive",
+    "status-leave",
+    "status-return",
+    "status-leave-request",
+  ];
+  document.body.classList.remove(...classes);
+  document.body.classList.add(`status-${key}`);
+  if (homeStatusEl) homeStatusEl.textContent = label || "";
+  // 顯示大照片以便邊框與動畫呈現（若目前隱藏）
+  if (homeHero) homeHero.classList.remove("hidden");
+}
+
+btnStart?.addEventListener("click", () => setHomeStatus("work", "上班"));
+btnEnd?.addEventListener("click", () => setHomeStatus("off", "下班"));
+btnOut?.addEventListener("click", () => setHomeStatus("out", "外出"));
+btnArrive?.addEventListener("click", () => setHomeStatus("arrive", "抵達"));
+btnReturn?.addEventListener("click", () => setHomeStatus("return", "返回"));
+btnLeave?.addEventListener("click", () => setHomeStatus("leave", "離開"));
+btnLeaveRequest?.addEventListener("click", () => setHomeStatus("leave-request", "請假"));
+// 補卡不改變狀態顏色，僅顯示文字（可依需求調整）
+btnMakeup?.addEventListener("click", () => {
+  if (homeStatusEl) homeStatusEl.textContent = "補卡";
+});
