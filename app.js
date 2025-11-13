@@ -604,6 +604,13 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         const circle = new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: target, radius: Number(targetRadius) || 100 });
 
         let currentMarker = null;
+        // 使用者目前位置以藍色圓點顯示
+        const currentIconSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>\n  <circle cx='12' cy='12' r='10' fill='white' />\n  <circle cx='12' cy='12' r='7' fill='#1E90FF' />\n</svg>`;
+        const currentIcon = {
+          url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(currentIconSvg)}`,
+          scaledSize: new maps.Size(24, 24),
+          anchor: new maps.Point(12, 12),
+        };
         const info = document.createElement("div");
         info.className = "muted";
         info.style.marginTop = "8px";
@@ -613,8 +620,21 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         const updateCurrent = (lat, lng) => {
           currentLat = lat; currentLng = lng;
           info.textContent = `目前位置：${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-          if (!currentMarker) currentMarker = new maps.Marker({ position: { lat, lng }, map, draggable: false, title: "目前位置" });
-          else currentMarker.setPosition({ lat, lng });
+          if (!currentMarker) {
+            currentMarker = new maps.Marker({ position: { lat, lng }, map, draggable: false, title: "目前位置", icon: currentIcon, zIndex: 1000 });
+          } else {
+            currentMarker.setPosition({ lat, lng });
+          }
+          // 讓視野能看到目標與目前位置（首次定位時調整）
+          try {
+            const bounds = new maps.LatLngBounds();
+            bounds.extend(target);
+            bounds.extend({ lat, lng });
+            map.fitBounds(bounds);
+            const listener = maps.event.addListenerOnce(map, 'bounds_changed', () => {
+              if (map.getZoom() > 18) map.setZoom(18);
+            });
+          } catch {}
         };
 
         // 初次定位
@@ -2951,7 +2971,8 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
           body.appendChild(preview);
           let stream = null;
           try {
-            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+            // 不限定鏡頭，優先確保任一相機可開啟
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
             video.srcObject = stream;
           } catch (err) {
             const msg = `無法啟用相機：${err?.message || err}`;
@@ -2961,7 +2982,10 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
             try {
               const track = stream?.getVideoTracks?.()[0];
               const settings = track?.getSettings?.() || {};
-              const w = settings.width || 1080; const h = settings.height || 1440;
+              // 以影片的原生尺寸為優先，避免拉伸或裁切
+              const w0 = video.videoWidth || settings.width || 1280;
+              const h0 = video.videoHeight || settings.height || 720;
+              const w = Math.max(1, w0); const h = Math.max(1, h0);
               const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
               const ctx = canvas.getContext('2d');
               // 將影片畫面繪到畫布（簡單直繪，避免裁切）
