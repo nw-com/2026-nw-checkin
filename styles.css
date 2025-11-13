@@ -215,7 +215,7 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .home-mid-stack {
   height: 50vh;
   display: grid;
-  grid-template-rows: 8vh 8vh 8vh 8vh 8vh 10vh;
+  grid-template-rows: 16vh 5vh 5vh 5vh 5vh 5vh 9vh; /* F–L */
   align-items: stretch;
   gap: 8px;
 }
@@ -225,13 +225,27 @@ button[disabled] { cursor: not-allowed; }
   justify-content: center;
   gap: 2vh;
 }
+.home-layout .home-mid-stack .row-h .btn,
+.home-layout .home-mid-stack .row-i .btn,
+.home-layout .home-mid-stack .row-j .btn,
+.home-layout .home-mid-stack .row-k .btn {
+  flex: 0 0 calc(50% - 1vh); /* 每顆按鈕半版寬（扣除間距的一半） */
+  box-sizing: border-box;
+}
+.home-layout .home-mid-stack .row-h,
+.home-layout .home-mid-stack .row-i,
+.home-layout .home-mid-stack .row-j,
+.home-layout .home-mid-stack .row-k {
+  width: 100%;
+  margin-inline: auto; /* 置中（不影響 100% 滿版顯示） */
+}
 .home-layout .home-mid-stack .status-text { font-size: 4vh; font-weight: 400; }
-/* 按鈕高 6vh，字體 4vh */
 .home-layout .home-mid-stack .btn {
-  height: 6vh;
+  height: 4.2vh;
   padding: 0 2vh;
-  font-size: 4vh;
-  border-radius: 2vh;
+  font-size: 2.8vh;
+  font-weight: 300; /* 細體 */
+  border-radius: 0; /* 直角 */
 }
 /* 顏色方案 */
 .btn-green { background: #0f9d58; }
@@ -252,7 +266,10 @@ body.status-leave-request #homeStatus { color: #f57c00; }
 
 /* 大照片邊框顏色（依狀態）與動畫效果 */
 .home-layout .home-hero-photo {
-  border: 6px solid #ffffff;
+  border-style: solid;
+  border-color: #ffffff;
+  border-width: clamp(8px, 2vh, 24px); /* 自適應邊框厚度：最小 8px，隨視窗 2vh，上限 24px */
+  box-sizing: border-box; /* 讓邊框向內縮不影響外部尺寸 */
   transition: border-color 200ms ease, box-shadow 200ms ease;
   animation: photoPulse 2400ms infinite ease-in-out;
 }
