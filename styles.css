@@ -194,7 +194,7 @@ button[disabled] { cursor: not-allowed; }
   position: fixed; top: 0; left: 0; right: 0;
   /* 使用 Grid 切為 A/B/C/D/E 五列 */
   display: grid;
-  grid-template-rows: 8vh 6vh 6vh 6vh calc(var(--hero-size) / 2);
+  grid-template-rows: 5vh 5vh 5vh 9vh 16vh;
   background: #CC0000;
 }
 .home-layout .app-subheader {
@@ -248,18 +248,17 @@ button[disabled] { cursor: not-allowed; }
   font-weight: 600;
 }
 /* A/B/C/D/E 文字堆疊（置於地圖上方） */
-.home-layout .home-header-stack { position: absolute; inset: 0; display: grid; grid-template-rows: 5% 5% 5% 9% 16%; z-index: 2; }
-.home-layout .home-header-stack .stack-row { display: grid; place-items: center; }
+/* 早期規則移除，改由下方單一規則統一管理 */
 .home-layout .home-header-stack .row-b,
 .home-layout .home-header-stack .row-c,
 .home-layout .home-header-stack .row-d { place-items: start center; }
 .home-layout .home-header-stack .stack-text { color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
-/* B 列：西元日期（細體，列高 6vh 的 80%） */
-.home-layout .home-header-stack .date { font-size: 1.2vh; font-weight: 300; }
-/* C 列：時間（粗體，列高 6vh 的 100%） */
-.home-layout .home-header-stack .time { font-size: 1.6vh; font-weight: 700; letter-spacing: 0.5px; }
-/* D 列：登入者姓名（細體，列高 6vh 的 80%） */
-.home-layout .home-header-stack .name { font-size: 2.16vh; font-weight: 300; }
+/* B 列：西元日期（細體，列高 5vh 的 60%） */
+.home-layout .home-header-stack .date { font-size: 3vh; font-weight: 300; }
+/* C 列：時間（粗體，列高 5vh 的 80%） */
+.home-layout .home-header-stack .time { font-size: 4vh; font-weight: 700; letter-spacing: 0.5px; }
+/* D 列：登入者姓名（細體，列高 9vh 的 60%） */
+.home-layout .home-header-stack .name { font-size: 5.4vh; font-weight: 300; }
 
 /* Header內容靠上 */
 .home-layout .app-header .header-left { display: none; }
@@ -270,13 +269,17 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .home-header-stack {
   position: absolute; inset: 0; height: 40vh; pointer-events: none; z-index: 1200;
   display: grid;
-  grid-template-rows: 5% 5% 5% 9% 16%;
+  grid-template-rows: 5vh 5vh 5vh 9vh 16vh;
 }
-.home-layout .home-header-stack .stack-row { display: grid; place-items: center; }
+/* 預設各列內容靠該列最上緣 */
+.home-layout .home-header-stack .stack-row { display: grid; place-items: start center; }
+/* A/E 列置中對齊 */
+.home-layout .home-header-stack .row-a,
+.home-layout .home-header-stack .row-e { place-items: center; }
 .home-layout .home-header-stack .stack-text { color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
-.home-layout .home-header-stack .stack-text.lunar { font-weight: 300; font-size: calc(6vh * 0.8); }
-.home-layout .home-header-stack .stack-text.date { font-weight: 700; font-size: calc(6vh * 0.8); }
-.home-layout .home-header-stack .stack-text.time { font-weight: 700; font-size: 6vh; letter-spacing: 0.5px; }
+.home-layout .home-header-stack .stack-text.lunar { font-weight: 300; }
+.home-layout .home-header-stack .stack-text.date { font-weight: 300; }
+.home-layout .home-header-stack .stack-text.time { font-weight: 700; letter-spacing: 0.5px; }
 
 /* 首頁：隱藏右上角小頭像，讓歡迎文字靠右顯示 */
 .home-layout .user-photo { display: none; }
