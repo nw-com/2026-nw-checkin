@@ -2908,6 +2908,8 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
 
     // 3) 自拍與留言（浮水印三列）
+    // 保證前一個視窗完全關閉，再開啟自拍視窗（避免堆疊競態）
+    await new Promise((r) => requestAnimationFrame(r));
     const photoDataUrl = await new Promise((resolve) => {
       let captured = null;
       openModal({
@@ -2916,6 +2918,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
           { key: "message", label: "留言（選填，最多 30 字）", type: "text", placeholder: "最多 30 字" },
         ],
         submitText: "確認",
+        refreshOnSubmit: false,
         onSubmit: async (data) => {
           if (!captured) { alert("請先拍照"); return false; }
           // 最多 30 字
@@ -2956,15 +2959,41 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
           }
         },
         afterRender: async ({ body }) => {
+          // 讓整個自拍視窗佔 90% 視窗高度
+          try { const modalEl = body?.parentElement; if (modalEl) { modalEl.style.height = '90vh'; modalEl.style.maxHeight = '90vh'; } } catch {}
           // 建立攝影機預覽與快門
           const video = document.createElement('video');
           video.autoplay = true; video.playsInline = true; video.muted = true;
-          video.style.width = '100%'; video.style.maxHeight = '45vh'; video.style.background = '#000';
+          video.style.width = '100%';
+          video.style.height = '';
+          video.style.aspectRatio = '9 / 16';
+          video.style.objectFit = 'cover';
+          video.style.background = '#000';
           video.style.borderRadius = '8px';
           const controls = document.createElement('div');
-          controls.style.display = 'flex'; controls.style.gap = '12px'; controls.style.marginTop = '8px';
-          const btnSnap = document.createElement('button'); btnSnap.className = 'btn btn-primary'; btnSnap.textContent = '快門'; attachPressInteractions(btnSnap);
-          const preview = document.createElement('img'); preview.style.width = '100%'; preview.style.marginTop = '8px'; preview.alt = '預覽照片';
+          controls.style.display = 'flex';
+          controls.style.justifyContent = 'center';
+          controls.style.marginTop = '12px';
+          const btnSnap = document.createElement('button'); btnSnap.className = 'btn btn-primary'; btnSnap.setAttribute('aria-label','拍照'); attachPressInteractions(btnSnap);
+          btnSnap.style.width = '70%';
+          btnSnap.style.display = 'flex';
+          btnSnap.style.alignItems = 'center';
+          btnSnap.style.justifyContent = 'center';
+          btnSnap.style.gap = '8px';
+          btnSnap.style.fontSize = '0'; // 不顯示文字
+          // 相機圖示 SVG（白色），跟隨文字顏色
+          btnSnap.innerHTML = `
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: currentColor;">
+              <rect x="4" y="7" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2" />
+              <path d="M9 7l1.5-2h3L15 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="2" />
+            </svg>`;
+          const preview = document.createElement('img');
+          preview.style.width = '100%';
+          preview.style.aspectRatio = '9 / 16';
+          preview.style.objectFit = 'cover';
+          preview.style.marginTop = '8px';
+          preview.alt = '預覽照片';
           controls.appendChild(btnSnap);
           body.appendChild(video);
           body.appendChild(controls);
@@ -2982,14 +3011,26 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
             try {
               const track = stream?.getVideoTracks?.()[0];
               const settings = track?.getSettings?.() || {};
-              // 以影片的原生尺寸為優先，避免拉伸或裁切
-              const w0 = video.videoWidth || settings.width || 1280;
-              const h0 = video.videoHeight || settings.height || 720;
-              const w = Math.max(1, w0); const h = Math.max(1, h0);
-              const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+              // 以影片的原生尺寸為優先，並裁切成 9:16 輸出
+              const desiredRatio = 9/16;
+              const sw = Math.max(1, video.videoWidth || settings.width || 1280);
+              const sh = Math.max(1, video.videoHeight || settings.height || 720);
+              const srcRatio = sw / sh;
+              let sx = 0, sy = 0, sWidth = sw, sHeight = sh;
+              if (srcRatio > desiredRatio) {
+                // 寬度過寬，左右裁切
+                sWidth = Math.floor(sh * desiredRatio);
+                sx = Math.floor((sw - sWidth) / 2);
+              } else if (srcRatio < desiredRatio) {
+                // 高度過高，上下裁切
+                sHeight = Math.floor(sw / desiredRatio);
+                sy = Math.floor((sh - sHeight) / 2);
+              }
+              const tw = sWidth; const th = sHeight;
+              const canvas = document.createElement('canvas'); canvas.width = tw; canvas.height = th;
               const ctx = canvas.getContext('2d');
-              // 將影片畫面繪到畫布（簡單直繪，避免裁切）
-              ctx.drawImage(video, 0, 0, w, h);
+              // 將影片畫面裁切中心區塊，輸出為 9:16
+              ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tw, th);
               captured = canvas.toDataURL('image/jpeg', 0.92);
               preview.src = captured;
             } catch (e) {
