@@ -128,29 +128,30 @@
         <section id="homeSection" class="section">
           <!-- 首頁：頁中 F–K（總高 50vh） -->
           <div id="homeMidStack" class="home-mid-stack">
-            <!-- F：保留區（16vh） -->
+            <!-- F：顯示大照片的下方 50%（16vh） -->
             <div class="mid-row row-f"></div>
             <!-- G：狀態顯示（字體 4vh） -->
             <div class="mid-row row-g">
               <div id="homeStatus" class="status-text" aria-live="polite"></div>
             </div>
-            <!-- H：上班（圓形直徑 10vh） -->
+            <!-- H：上班按鈕（5vh，紅色） -->
             <div class="mid-row row-h">
-              <button id="btnStart" class="btn btn-green" type="button">上班</button>
+              <button id="btnStart" class="btn btn-red" type="button">打卡</button>
             </div>
-            <!-- I：保留區塊（8vh，暫不顯示內容） -->
-            <div class="mid-row row-i"></div>
+            <!-- I：請假／補卡按鈕（5vh，紅色） -->
+            <div class="mid-row row-i">
+              <button id="btnLeaveRequest" class="btn btn-grey" type="button">請假</button>
+              <button id="btnMakeup" class="btn btn-grey" type="button">補卡</button>
+            </div>
+            <!-- J：保留區塊（8vh，暫不顯示內容） -->
+            <div class="mid-row row-j"></div>
           </div>
         </section>
 
         <!-- 打卡分頁 -->
         <section id="checkinSection" class="section hidden">
           <div class="panel">
-            <h3>打卡</h3>
-            <p id="checkinSubTitle" class="muted"></p>
-            <p id="locationInfo" class="muted">定位中…</p>
-            <button id="checkinBtn" class="btn btn-primary">打卡</button>
-            <p id="checkinResult" class="muted"></p>
+            <div id="checkinContent"></div>
           </div>
         </section>
 
@@ -166,9 +167,7 @@
         <!-- 幹部分頁 -->
         <section id="leaderSection" class="section hidden">
           <div class="panel">
-            <h3>幹部</h3>
-            <p id="leaderSubTitle" class="muted"></p>
-            <p class="muted">此分頁的功能將在後續實作。</p>
+            <div id="leaderContent"></div>
           </div>
         </section>
 

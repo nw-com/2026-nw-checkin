@@ -2481,7 +2481,7 @@ let firebaseApp, auth, db, functionsApp;
         startGeoRefresh();
 
         // 綁定打卡
-        checkinBtn.addEventListener("click", () => doCheckin(user, role));
+        checkinBtn?.addEventListener("click", () => doCheckin(user, role));
       } else {
         // 顯示登入頁
         appView.classList.add("hidden");
@@ -2755,9 +2755,11 @@ let firebaseApp, auth, db, functionsApp;
     });
     // 更新各分頁的子分頁標題（作占位）
     if (activeMainTab === "checkin") {
-      checkinSubTitle.textContent = label;
+      if (checkinSubTitle) checkinSubTitle.textContent = label;
+      renderCheckinContent(label);
     } else if (activeMainTab === "leader") {
-      leaderSubTitle.textContent = label;
+      if (leaderSubTitle) leaderSubTitle.textContent = label;
+      renderLeaderContent(label);
     } else if (activeMainTab === "manage") {
       manageSubTitle.textContent = label;
     } else if (activeMainTab === "feature") {
@@ -2768,25 +2770,142 @@ let firebaseApp, auth, db, functionsApp;
     }
   }
 
+  // 幹部分頁內容渲染（子分頁）
+  function renderLeaderContent(label) {
+    const container = document.getElementById("leaderContent");
+    if (!container) return;
+    container.innerHTML = "";
+    if (label === "班表") {
+      const html = `
+        <div class="roster-layout" role="region" aria-label="班表">
+          <div class="roster-row roster-a">
+            <label for="rosterOfficerSelect" class="roster-label">幹部名單：</label>
+            <select id="rosterOfficerSelect" class="roster-select">
+              <option value="">請選擇幹部</option>
+            </select>
+          </div>
+          <div class="roster-row roster-b">
+            <div id="rosterCalendar" class="roster-calendar" aria-live="polite">月曆</div>
+          </div>
+          <div class="roster-row roster-c">
+            <div id="rosterInfo" class="roster-info"></div>
+          </div>
+        </div>`;
+      container.innerHTML = html;
+      const info = document.getElementById("rosterInfo");
+      const dt = new Date();
+      const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      if (info) info.textContent = `日期：${dateStr}`;
+      const sel = document.getElementById("rosterOfficerSelect");
+      if (sel) {
+        const officers = appState.accounts.filter((a) => (a.role || "").includes("主管") || (a.role || "").includes("管理"));
+        const opts = officers.length ? officers : appState.accounts.slice(0, 10);
+        opts.forEach((a) => {
+          const opt = document.createElement("option");
+          opt.value = a.id;
+          opt.textContent = a.name || a.email || a.id;
+          sel.appendChild(opt);
+        });
+      }
+
+      // 月曆：預設當月，提供上一月/下一月切換
+      const calendarRoot = document.getElementById("rosterCalendar");
+      if (calendarRoot) {
+        let viewDate = new Date(dt.getFullYear(), dt.getMonth(), 1);
+
+        const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
+
+        function monthLabel(date) {
+          return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, "0")}月`;
+        }
+        function daysInMonth(date) {
+          const y = date.getFullYear();
+          const m = date.getMonth();
+          return new Date(y, m + 1, 0).getDate();
+        }
+        function firstWeekday(date) {
+          return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+        }
+        function renderMonth(date) {
+          const totalDays = daysInMonth(date);
+          const startPad = firstWeekday(date);
+          const cells = [];
+          for (let i = 0; i < startPad; i++) cells.push("");
+          for (let d = 1; d <= totalDays; d++) cells.push(String(d));
+          while (cells.length % 7 !== 0) cells.push("");
+
+          const rows = [];
+          for (let i = 0; i < cells.length; i += 7) {
+            rows.push(cells.slice(i, i + 7));
+          }
+
+          const today = new Date();
+          const isSameMonth = today.getFullYear() === date.getFullYear() && today.getMonth() === date.getMonth();
+
+          const headerHtml = `
+            <div class="roster-cal-header" role="group" aria-label="月曆導航">
+              <button id="rosterPrevMonth" class="btn" aria-label="上一月">◀</button>
+              <div class="roster-cal-title" aria-live="polite">${monthLabel(date)}</div>
+              <button id="rosterNextMonth" class="btn" aria-label="下一月">▶</button>
+            </div>
+          `;
+          const tableHeader = `
+            <table class="roster-cal-table" aria-label="${monthLabel(date)}">
+              <thead><tr>${weekdayLabels.map((w) => `<th scope="col">${w}</th>`).join("")}</tr></thead>
+              <tbody>
+                ${rows
+                  .map(
+                    (r) =>
+                      `<tr>${r
+                        .map((c) => {
+                          const isToday = isSameMonth && String(today.getDate()) === c;
+                          const cls = ["roster-cal-cell", c ? "" : "empty", isToday ? "today" : ""].filter(Boolean).join(" ");
+                          return `<td class="${cls}" data-day="${c || ""}">${c || ""}</td>`;
+                        })
+                        .join("")}</tr>`
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          `;
+          calendarRoot.innerHTML = headerHtml + tableHeader;
+
+          const prevBtn = document.getElementById("rosterPrevMonth");
+          const nextBtn = document.getElementById("rosterNextMonth");
+          prevBtn?.addEventListener("click", () => {
+            viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1);
+            renderMonth(viewDate);
+          });
+          nextBtn?.addEventListener("click", () => {
+            viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+            renderMonth(viewDate);
+          });
+        }
+
+        renderMonth(viewDate);
+      }
+    }
+  }
+
   // 初始分頁
   setActiveTab("home");
 
   // 內部功能：定位與打卡
   function initGeolocation() {
     if (!("geolocation" in navigator)) {
-      locationInfo.textContent = "此裝置不支援定位";
+      if (locationInfo) locationInfo.textContent = "此裝置不支援定位";
       return;
     }
   navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
-        locationInfo.textContent = `目前位置：${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+        if (locationInfo) locationInfo.textContent = `目前位置：${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
         // 記錄座標並更新首頁地圖（若在首頁）
         lastCoords = { latitude, longitude };
         updateHomeMap();
       },
       (err) => {
-        locationInfo.textContent = `定位失敗：${err?.message || err}`;
+        if (locationInfo) locationInfo.textContent = `定位失敗：${err?.message || err}`;
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
@@ -2819,9 +2938,9 @@ let firebaseApp, auth, db, functionsApp;
         lng: lng ?? null,
         createdAt: serverTimestamp(),
       });
-      checkinResult.textContent = `打卡成功：${docRef.id}`;
+      if (checkinResult) checkinResult.textContent = `打卡成功：${docRef.id}`;
     } catch (err) {
-      checkinResult.textContent = `打卡失敗：${err?.message || err}`;
+      if (checkinResult) checkinResult.textContent = `打卡失敗：${err?.message || err}`;
     }
   }
 }
@@ -2859,7 +2978,7 @@ emailSignInBtn?.addEventListener("click", async () => {
 // 子分頁定義（頁中上）
 const SUB_TABS = {
   home: [],
-  checkin: ["紀錄", "請假", "計點"],
+  checkin: ["紀錄", "請假", "班表", "計點"],
   leader: ["地圖", "紀錄", "請假", "計點"],
   manage: ["總覽", "地圖", "記錄", "請假", "計點"],
   feature: ["公告", "文件", "工具"],
@@ -3160,4 +3279,43 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
 
 // 將「上班」按鈕改為啟動完整打卡流程
 btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
-btnStart?.addEventListener("click", () => startCheckinFlow("work", "上班"));
+ btnStart?.addEventListener("click", () => startCheckinFlow("work", "打卡"));
+  // 打卡分頁內容渲染（子分頁）
+  function renderCheckinContent(label) {
+    const container = document.getElementById("checkinContent");
+    if (!container) return;
+    container.innerHTML = "";
+    if (label === "班表") {
+      const html = `
+        <div class="roster-layout" role="region" aria-label="班表">
+          <div class="roster-row roster-a">
+            <label for="rosterOfficerSelect" class="roster-label">幹部名單：</label>
+            <select id="rosterOfficerSelect" class="roster-select">
+              <option value="">請選擇幹部</option>
+            </select>
+          </div>
+          <div class="roster-row roster-b">
+            <div id="rosterCalendar" class="roster-calendar" aria-live="polite">月曆</div>
+          </div>
+          <div class="roster-row roster-c">
+            <div id="rosterInfo" class="roster-info"></div>
+          </div>
+        </div>`;
+      container.innerHTML = html;
+      const info = document.getElementById("rosterInfo");
+      const dt = new Date();
+      const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      if (info) info.textContent = `日期：${dateStr}`;
+      const sel = document.getElementById("rosterOfficerSelect");
+      if (sel) {
+        const officers = appState.accounts.filter((a) => (a.role || "").includes("主管") || (a.role || "").includes("管理"));
+        const opts = officers.length ? officers : appState.accounts.slice(0, 10);
+        opts.forEach((a) => {
+          const opt = document.createElement("option");
+          opt.value = a.id;
+          opt.textContent = a.name || a.email || a.id;
+          sel.appendChild(opt);
+        });
+      }
+    }
+  }
