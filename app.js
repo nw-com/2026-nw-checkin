@@ -188,6 +188,7 @@ const settingsSection = document.getElementById("settingsSection");
 const leaderSection = document.getElementById("leaderSection");
 const manageSection = document.getElementById("manageSection");
 const featureSection = document.getElementById("featureSection");
+const personnelSection = document.getElementById("personnelSection");
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
 
 const locationInfo = document.getElementById("locationInfo");
@@ -2715,6 +2716,7 @@ let firebaseApp, auth, db, functionsApp;
     homeSection.classList.toggle("hidden", tab !== "home");
     checkinSection.classList.toggle("hidden", tab !== "checkin");
     leaderSection.classList.toggle("hidden", tab !== "leader");
+    personnelSection?.classList.toggle("hidden", tab !== "personnel");
     manageSection.classList.toggle("hidden", tab !== "manage");
     featureSection.classList.toggle("hidden", tab !== "feature");
     settingsSection.classList.toggle("hidden", tab !== "settings");
@@ -2760,6 +2762,8 @@ let firebaseApp, auth, db, functionsApp;
     } else if (activeMainTab === "leader") {
       if (leaderSubTitle) leaderSubTitle.textContent = label;
       renderLeaderContent(label);
+    } else if (activeMainTab === "personnel") {
+      renderPersonnelContent(label);
     } else if (activeMainTab === "manage") {
       manageSubTitle.textContent = label;
     } else if (activeMainTab === "feature") {
@@ -2767,6 +2771,346 @@ let firebaseApp, auth, db, functionsApp;
     } else if (activeMainTab === "settings") {
       settingsSubTitle.textContent = label;
       renderSettingsContent(label);
+    }
+  }
+
+  // 人事分頁內容渲染（子分頁）
+  function renderPersonnelContent(label) {
+    const container = document.getElementById("personnelContent");
+    if (!container) return;
+    container.innerHTML = "";
+    if (label === "班表") {
+      const html = `
+        <div class="roster-layout" role="region" aria-label="班表">
+          <div class="roster-row roster-add">
+            <button id="btnAddRoster" class="btn btn-sm hidden">編輯</button>
+          </div>
+          <div class="roster-row roster-a">
+            <label for="rosterOfficerSelect" class="roster-label">幹部名單：</label>
+            <select id="rosterOfficerSelect" class="roster-select">
+              <option value="">請選擇幹部</option>
+            </select>
+          </div>
+          <div class="roster-row roster-b">
+            <div id="rosterCalendar" class="roster-calendar" aria-live="polite">月曆</div>
+          </div>
+          <div class="roster-row roster-c">
+            <div id="rosterInfo" class="roster-info"></div>
+          </div>
+        </div>`;
+      container.innerHTML = html;
+      const info = document.getElementById("rosterInfo");
+      const dt = new Date();
+      // 在資訊區建立日期與列表
+      if (info) {
+        info.innerHTML = `
+          <div class="roster-datebar">
+            <div id="rosterDate" class="roster-date"></div>
+          </div>
+          <table id="rosterList" class="table roster-list" aria-label="班表列表">
+            <thead>
+              <tr>
+                <th scope="col">上班時間</th>
+                <th scope="col">下班時間</th>
+                <th scope="col">狀態</th>
+                <th scope="col">操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        `;
+      }
+      const rosterDateEl = document.getElementById("rosterDate");
+      const rosterListBody = document.querySelector("#rosterList tbody");
+      const addBtn = document.getElementById("btnAddRoster");
+      const sel = document.getElementById("rosterOfficerSelect");
+      // 幹部名單選項
+      if (sel) {
+        const officers = appState.accounts.filter((a) => (a.role || "").includes("主管") || (a.role || "").includes("管理"));
+        const opts = officers.length ? officers : appState.accounts.slice(0, 10);
+        opts.forEach((a) => {
+          const opt = document.createElement("option");
+          opt.value = a.id;
+          opt.textContent = a.name || a.email || a.id;
+          sel.appendChild(opt);
+        });
+      }
+      // 僅在選擇幹部後顯示新增按鈕
+      function refreshAddVisibility() {
+        if (!addBtn) return;
+        const hasOfficer = !!(sel && sel.value);
+        addBtn.classList.toggle("hidden", !hasOfficer);
+      }
+      refreshAddVisibility();
+      sel?.addEventListener("change", () => {
+        refreshAddVisibility();
+        updateRoster(currentDate);
+      });
+      let currentDate = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+      function isHoliday(d) { return d.getDay() === 0 || d.getDay() === 6; }
+      // 未指派值班時，週五視為休假日
+      function isDefaultHoliday(d) { const wd = d.getDay(); return wd === 0 || wd === 6 || wd === 5; }
+      function ymd(date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
+      const rosterPlans = {}; // officerId -> { ymd -> { startTime, endTime, status } }
+      function updateRoster(date) {
+        if (rosterDateEl) rosterDateEl.textContent = `日期：${ymd(date)}`;
+        if (!rosterListBody) return;
+        rosterListBody.innerHTML = "";
+        const officerId = sel?.value || "";
+        const key = ymd(date);
+        const plan = (rosterPlans[officerId] || {})[key] || null;
+        const wd = date.getDay();
+        const holiday = isHoliday(date);
+        const defaultHoliday = isDefaultHoliday(date);
+        const startCell = plan ? (plan.status === "休假日" ? "" : (plan.startTime || "09:00")) : (defaultHoliday ? "" : "09:00");
+        const endCell = plan ? (plan.status === "休假日" ? "" : (plan.endTime || "17:30")) : (defaultHoliday ? "" : "17:30");
+        const status = plan ? plan.status : (defaultHoliday ? "休假日" : "上班日");
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${startCell}</td><td>${endCell}</td><td>${status}</td><td><button class="btn btn-xs roster-edit">編輯</button> <button class="btn btn-xs roster-del">刪除</button></td>`;
+        // 編輯
+        tr.querySelector(".roster-edit")?.addEventListener("click", () => {
+          if (!officerId) return;
+          const initial = { startTime: startCell || "09:00", endTime: endCell || "17:30", status };
+          openModal({
+            title: "編輯班表",
+            fields: [
+              { key: "startTime", label: "上班時間", type: "text", placeholder: "HH:mm" },
+              { key: "endTime", label: "下班時間", type: "text", placeholder: "HH:mm" },
+              { key: "status", label: "狀態", type: "select", options: [{ id: "上班日", name: "上班日" }, { id: "值班日", name: "值班日" }, { id: "休假日", name: "休假日" }] },
+            ],
+            initial,
+            submitText: "儲存",
+            onSubmit: async (data) => {
+              rosterPlans[officerId] = rosterPlans[officerId] || {};
+              rosterPlans[officerId][key] = { startTime: data.startTime, endTime: data.endTime, status: data.status };
+              updateRoster(date);
+              return true;
+            },
+          });
+        });
+        // 刪除 => 標記為休假日
+        tr.querySelector(".roster-del")?.addEventListener("click", async () => {
+          if (!officerId) return;
+          const ok = await confirmAction({ title: "刪除班表", text: "確定要刪除？此日期將標記為休假日。", confirmText: "刪除" });
+          if (!ok) return;
+          rosterPlans[officerId] = rosterPlans[officerId] || {};
+          rosterPlans[officerId][key] = { startTime: "", endTime: "", status: "休假日" };
+          updateRoster(date);
+        });
+        rosterListBody.appendChild(tr);
+      }
+      updateRoster(currentDate);
+      // 開啟新增班表彈窗
+      if (addBtn) {
+        addBtn.addEventListener("click", () => {
+          const officerId = sel?.value || "";
+          if (!officerId) return;
+          const baseYear = currentDate.getFullYear();
+          const baseMonth = currentDate.getMonth();
+          const totalDays = new Date(baseYear, baseMonth + 1, 0).getDate();
+          const workSelected = [];
+          const dutySelected = [];
+          openModal({
+            title: "編輯班表",
+            fields: [
+              { key: "startTime", label: "上班時間", type: "text", placeholder: "HH:mm" },
+              { key: "endTime", label: "下班時間", type: "text", placeholder: "HH:mm" }
+            ],
+            initial: { startTime: "09:00", endTime: "17:30" },
+            submitText: "儲存",
+            onSubmit: async (data) => {
+              // 全量同步當月的班表：值班 > 上班 > 休假
+              rosterPlans[officerId] = rosterPlans[officerId] || {};
+              for (let d = 1; d <= totalDays; d++) {
+                const k = `${baseYear}-${String(baseMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                if (dutySelected.includes(d)) {
+                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "值班日" };
+                } else if (workSelected.includes(d)) {
+                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "上班日" };
+                } else {
+                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "休假日" };
+                }
+              }
+              updateRoster(currentDate);
+              // 通知月曆重新渲染，顯示值班徽章
+              document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
+              return true;
+            },
+            afterRender: ({ body }) => {
+              // 重置選取狀態，避免第二次開啟殘留
+              if (Array.isArray(workSelected)) workSelected.length = 0;
+              if (Array.isArray(dutySelected)) dutySelected.length = 0;
+              // 上班日期選擇格
+              const rowWork = document.createElement("div");
+              rowWork.className = "form-row";
+              const labelWork = document.createElement("label");
+              labelWork.className = "label";
+              labelWork.textContent = "上班日期";
+              const gridWork = document.createElement("div");
+              gridWork.className = "pick-grid";
+              rowWork.appendChild(labelWork);
+              rowWork.appendChild(gridWork);
+              // 值班日期選擇格
+              const rowDuty = document.createElement("div");
+              rowDuty.className = "form-row";
+              const labelDuty = document.createElement("label");
+              labelDuty.className = "label";
+              labelDuty.textContent = "值班日期";
+              const gridDuty = document.createElement("div");
+              gridDuty.className = "pick-grid";
+              rowDuty.appendChild(labelDuty);
+              rowDuty.appendChild(gridDuty);
+
+              // 以週排列（周日至周六）並同步既有班表選擇
+              const startPad = new Date(baseYear, baseMonth, 1).getDay();
+              const endPad = (startPad + totalDays) % 7 === 0 ? 0 : 7 - ((startPad + totalDays) % 7);
+              const officerId2 = officerId;
+              const monthPlans = rosterPlans[officerId2] || {};
+
+              // 前置空格
+              for (let i = 0; i < startPad; i++) {
+                const blankW = document.createElement("div"); blankW.className = "pick-day"; blankW.style.visibility = "hidden";
+                const blankD = document.createElement("div"); blankD.className = "pick-day"; blankD.style.visibility = "hidden";
+                gridWork.appendChild(blankW);
+                gridDuty.appendChild(blankD);
+              }
+
+              for (let d = 1; d <= totalDays; d++) {
+                const date = new Date(baseYear, baseMonth, d);
+                const weekday = date.getDay();
+                const key = `${baseYear}-${String(baseMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+                const plan = monthPlans[key];
+                // 上班日期按鈕
+                const w = document.createElement("div");
+                w.className = "pick-day";
+                w.textContent = String(d);
+                // 先依既有計畫標記
+                if (plan?.status === "上班日") {
+                  w.classList.add("work-selected");
+                  workSelected.push(d);
+                } else if (!plan && weekday >= 1 && weekday <= 4) {
+                  // 無既有計畫則預設週一至週四為上班日
+                  w.classList.add("work-selected");
+                  workSelected.push(d);
+                }
+                w.addEventListener("click", () => {
+                  const idx = workSelected.indexOf(d);
+                  if (idx >= 0) {
+                    workSelected.splice(idx, 1);
+                    w.classList.remove("work-selected");
+                  } else {
+                    workSelected.push(d);
+                    w.classList.add("work-selected");
+                  }
+                });
+                gridWork.appendChild(w);
+                // 值班日期按鈕
+                const u = document.createElement("div");
+                u.className = "pick-day";
+                u.textContent = String(d);
+                if (plan?.status === "值班日") {
+                  u.classList.add("duty-selected");
+                  dutySelected.push(d);
+                }
+                u.addEventListener("click", () => {
+                  const idx = dutySelected.indexOf(d);
+                  if (idx >= 0) {
+                    dutySelected.splice(idx, 1);
+                    u.classList.remove("duty-selected");
+                  } else {
+                    dutySelected.push(d);
+                    u.classList.add("duty-selected");
+                  }
+                });
+                gridDuty.appendChild(u);
+              }
+
+              // 尾端空格補齊整週
+              for (let i = 0; i < endPad; i++) {
+                const blankW = document.createElement("div"); blankW.className = "pick-day"; blankW.style.visibility = "hidden";
+                const blankD = document.createElement("div"); blankD.className = "pick-day"; blankD.style.visibility = "hidden";
+                gridWork.appendChild(blankW);
+                gridDuty.appendChild(blankD);
+              }
+
+              body.appendChild(rowWork);
+              body.appendChild(rowDuty);
+            }
+          });
+        });
+      }
+      // 下方原本的幹部選單填充邏輯已上移，避免重複宣告
+
+      // 月曆渲染（沿用現有邏輯）
+      const calendarRoot = document.getElementById("rosterCalendar");
+      if (calendarRoot) {
+        let viewDate = new Date(dt.getFullYear(), dt.getMonth(), 1);
+        let selectedDay = currentDate.getDate();
+        const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
+        function monthLabel(date) { return `${date.getFullYear()}年${String(date.getMonth()+1).padStart(2, "0")}月`; }
+        function daysInMonth(date) { const y = date.getFullYear(); const m = date.getMonth(); return new Date(y, m + 1, 0).getDate(); }
+        function firstWeekday(date) { return new Date(date.getFullYear(), date.getMonth(), 1).getDay(); }
+        function renderMonth(date) {
+          const totalDays = daysInMonth(date);
+          const startPad = firstWeekday(date);
+          const cells = [];
+          for (let i = 0; i < startPad; i++) cells.push("");
+          for (let d = 1; d <= totalDays; d++) cells.push(String(d));
+          while (cells.length % 7 !== 0) cells.push("");
+          const rows = [];
+          for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+          const today = new Date();
+          const isSameMonth = today.getFullYear() === date.getFullYear() && today.getMonth() === date.getMonth();
+          const headerHtml = `
+            <div class="roster-cal-header" role="group" aria-label="月曆導航">
+              <button id="rosterPrevMonth" class="btn" aria-label="上一月">◀</button>
+              <div class="roster-cal-title" aria-live="polite">${monthLabel(date)}</div>
+              <button id="rosterNextMonth" class="btn" aria-label="下一月">▶</button>
+            </div>`;
+          const tableHeader = `
+            <table class="roster-cal-table" aria-label="${monthLabel(date)}">
+              <thead><tr>${weekdayLabels.map((w) => `<th scope="col">${w}</th>`).join("")}</tr></thead>
+              <tbody>
+                ${rows.map((r) => `<tr>${r.map((c) => {
+                  const isToday = isSameMonth && String(today.getDate()) === c;
+                  const cellCls = ["roster-cal-cell", c ? "" : "empty", isToday ? "today" : ""].filter(Boolean).join(" ");
+                  if (!c) return `<td class="${cellCls}"></td>`;
+                  const officerId = sel?.value || "";
+                  const k = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(c).padStart(2,'0')}`;
+                  const plan = (rosterPlans[officerId] || {})[k];
+                  const dutyBadge = plan?.status === "值班日" ? '<span class="roster-cal-duty">值班</span>' : '';
+                  return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${c}">${c}</button>${dutyBadge}</td>`;
+                }).join("")}</tr>`).join("")}
+              </tbody>
+            </table>`;
+          calendarRoot.innerHTML = headerHtml + tableHeader;
+          const prevBtn = document.getElementById("rosterPrevMonth");
+          const nextBtn = document.getElementById("rosterNextMonth");
+          prevBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); renderMonth(viewDate); });
+          nextBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); renderMonth(viewDate); });
+          // 接收班表變更事件，重新渲染徽章
+          calendarRoot.addEventListener("rosterPlansChanged", () => renderMonth(viewDate));
+          // 初次渲染後套用選取框（若同月）
+          if (currentDate.getFullYear() === viewDate.getFullYear() && currentDate.getMonth() === viewDate.getMonth()) {
+            const btnSel = calendarRoot.querySelector(`.roster-cal-day[data-day="${String(selectedDay)}"]`);
+            if (btnSel) btnSel.closest("td")?.classList.add("selected");
+          }
+          // 日期按鈕事件：更新日期與列表與選取效果
+          calendarRoot.addEventListener("click", (e) => {
+            const btn = e.target.closest(".roster-cal-day");
+            if (!btn) return;
+            const day = btn.dataset.day;
+            if (!day) return;
+            // 更新選取框
+            calendarRoot.querySelectorAll(".roster-cal-cell.selected").forEach((cell) => cell.classList.remove("selected"));
+            btn.closest("td")?.classList.add("selected");
+            selectedDay = parseInt(day, 10);
+            currentDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), selectedDay);
+            updateRoster(currentDate);
+          });
+        }
+        renderMonth(viewDate);
+      }
     }
   }
 
@@ -2842,26 +3186,61 @@ let firebaseApp, auth, db, functionsApp;
           const today = new Date();
           const isSameMonth = today.getFullYear() === date.getFullYear() && today.getMonth() === date.getMonth();
 
+          function titleHtml(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, "0");
+            return `
+              <div class="cal-year">${y}</div>
+              <div class="cal-month">年${m}</div>
+              <div class="cal-text">月</div>
+            `;
+          }
           const headerHtml = `
             <div class="roster-cal-header" role="group" aria-label="月曆導航">
-              <button id="rosterPrevMonth" class="btn" aria-label="上一月">◀</button>
-              <div class="roster-cal-title" aria-live="polite">${monthLabel(date)}</div>
-              <button id="rosterNextMonth" class="btn" aria-label="下一月">▶</button>
+              <div class="roster-cal-nav">
+                <button id="rosterPrevMonth" class="roster-cal-nav-btn" aria-label="上一月">◀</button>
+                <button id="rosterNextMonth" class="roster-cal-nav-btn" aria-label="下一月">▶</button>
+              </div>
+              <div class="roster-cal-title" aria-live="polite">${titleHtml(date)}</div>
             </div>
           `;
+          // 改為包含前月、次月日期的格子
+          const prevMonthLast = daysInMonth(new Date(date.getFullYear(), date.getMonth(), 0));
+          const cellsObjs = [];
+          for (let i = 0; i < startPad; i++) {
+            cellsObjs.push({ day: prevMonthLast - startPad + 1 + i, kind: "prev" });
+          }
+          for (let d = 1; d <= totalDays; d++) {
+            cellsObjs.push({ day: d, kind: "curr" });
+          }
+          let nextDay = 1;
+          while (cellsObjs.length % 7 !== 0) {
+            cellsObjs.push({ day: nextDay++, kind: "next" });
+          }
+          const rowsObjs = [];
+          for (let i = 0; i < cellsObjs.length; i += 7) {
+            rowsObjs.push(cellsObjs.slice(i, i + 7));
+          }
+
           const tableHtml = `
             <table class="roster-cal-table" aria-label="${monthLabel(date)}">
               <thead><tr>${weekdayLabels.map((w) => `<th scope="col">${w}</th>`).join("")}</tr></thead>
               <tbody>
-                ${rows
+                ${rowsObjs
                   .map(
                     (r) =>
                       `<tr>${r
-                        .map((c) => {
-                          const isToday = isSameMonth && String(today.getDate()) === c;
-                          const cellCls = ["roster-cal-cell", c ? "" : "empty", isToday ? "today" : ""].filter(Boolean).join(" ");
-                          if (!c) return `<td class="${cellCls}"></td>`;
-                          return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${c}">${c}</button></td>`;
+                        .map((cell, idx) => {
+                          const isToday = cell.kind === "curr" && isSameMonth && today.getDate() === cell.day;
+                          const cellCls = [
+                            "roster-cal-cell",
+                            cell.kind,
+                            isToday ? "today" : ""
+                          ].filter(Boolean).join(" ");
+                          if (cell.kind !== "curr") {
+                            return `<td class="${cellCls}"><span class="roster-cal-day-disabled">${cell.day}</span></td>`;
+                          }
+                          return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${cell.day}">${cell.day}</button></td>`;
                         })
                         .join("")}</tr>`
                   )
@@ -2871,15 +3250,25 @@ let firebaseApp, auth, db, functionsApp;
           `;
           calendarRoot.innerHTML = headerHtml + tableHtml;
 
-          // 日期按鈕事件：更新右側資訊
+          // 渲染後套用選取框（若同月）
+          if (viewDate.getFullYear() === dt.getFullYear() && viewDate.getMonth() === dt.getMonth()) {
+            const btnSel = calendarRoot.querySelector(`.roster-cal-day[data-day="${String(selectedDay)}"]`);
+            if (btnSel) btnSel.closest("td")?.classList.add("selected");
+          }
+
+          // 日期按鈕事件：更新右側資訊與選取效果
           calendarRoot.addEventListener("click", (e) => {
             const btn = e.target.closest(".roster-cal-day");
             if (!btn) return;
             const day = btn.dataset.day;
             if (!day) return;
+            // 更新選取框
+            calendarRoot.querySelectorAll(".roster-cal-cell.selected").forEach((cell) => cell.classList.remove("selected"));
+            btn.closest("td")?.classList.add("selected");
             const y = viewDate.getFullYear();
             const m = viewDate.getMonth();
             const d = new Date(y, m, parseInt(day, 10));
+            selectedDay = d.getDate();
             const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
             const infoEl = document.getElementById("rosterInfo");
             if (infoEl) infoEl.textContent = `日期：${ymd}`;
@@ -2992,8 +3381,9 @@ emailSignInBtn?.addEventListener("click", async () => {
 // 子分頁定義（頁中上）
 const SUB_TABS = {
   home: [],
-  checkin: ["紀錄", "請假", "班表", "計點"],
+  checkin: ["紀錄", "請假", "計點"],
   leader: ["地圖", "紀錄", "請假", "計點"],
+  personnel: ["班表"],
   manage: ["總覽", "地圖", "記錄", "請假", "計點"],
   feature: ["公告", "文件", "工具"],
   settings: ["一般", "帳號", "社區", "規則", "系統"],

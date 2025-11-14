@@ -395,20 +395,55 @@ body.status-leave-request { --hero-pulse-rgb: 245,124,0; }
 .roster-layout { height: 78vh; display: flex; flex-direction: column; }
 .roster-row { display: flex; align-items: center; gap: 1vh; padding: 1vh; }
 .roster-a { height: 6vh; }
-.roster-b { height: 36vh; }
-.roster-c { height: 36vh; }
+.roster-b { height: 42vh; }
+.roster-c { height: 20vh; }
 .roster-label { font-size: 2.2vh; }
 .roster-select { font-size: 2.2vh; padding: 0.6vh 1vh; }
 .roster-calendar { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #f5f5f5; border: 1px solid #ddd; }
-.roster-info { width: 100%; height: 100%; padding: 1vh; background: #fff; border: 1px solid #ddd; }
+.roster-info { width: 100%; height: 100%; padding: 1vh; background: #fff; border: 1px solid #ddd; font-size: 16px; overflow-x: auto; }
 /* 班表月曆樣式 */
-.roster-calendar { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
-.roster-cal-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.roster-cal-title { font-weight: 600; color: #111827; }
+.roster-calendar { display: block; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 0; padding: 8px; box-shadow: none; }
+/* 導覽置於 thead 上方（見 JS 結構），按鈕深色、標題三行 */
+.roster-cal-header { display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+.roster-cal-nav { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.roster-cal-nav-btn { width: 36px; height: 36px; border: none; border-radius: 8px; background: #111827; color: #ffffff; font-size: 18px; line-height: 1; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+.roster-cal-nav-btn:hover { background: #0f172a; }
+.roster-cal-nav-btn:active { transform: translateY(1px); }
+.roster-cal-title { display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 600; color: #111827; line-height: 1.05; }
+.roster-cal-title .title-line { font-size: 14px; }
+.roster-cal-title .title-year { font-size: 16px; }
+
+/* 表格與表頭 */
 .roster-cal-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.roster-cal-table thead th { text-align: center; font-size: 13px; color: #6b7280; border-bottom: 1px solid #e5e7eb; padding: 6px; }
-.roster-cal-table tbody td { border-bottom: 1px solid #f3f4f6; padding: 4px; text-align: center; }
-.roster-cal-cell.empty { background: #fafafa; }
-.roster-cal-day { width: 100%; aspect-ratio: 1 / 1; min-height: 36px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 8px; background: #f9fafb; color: #111827; font-size: 14px; }
+.roster-cal-table thead th { text-align: center; font-size: 13px; color: #6b7280; background: #f9fafb; border: none; padding: 8px 4px; font-weight: 500; }
+.roster-cal-table tbody td { border: none; padding: 0; text-align: center; }
+
+/* 日期格：依月份狀態區分 */
+.roster-cal-cell { padding: 0; }
+.roster-cal-cell.prev .roster-cal-day-disabled,
+.roster-cal-cell.next .roster-cal-day-disabled { background: #eeeeee; color: #9ca3af; }
+.roster-cal-cell.curr .roster-cal-day { background: #e8f1ff; color: #0f172a; border: none; }
+.roster-cal-cell.curr .roster-cal-day:hover { background: #dbe9ff; }
+.roster-cal-cell.today .roster-cal-day { background: #ffe4e6; border: none; }
+
+/* 可點與不可點的方塊格式 */
+.roster-cal-day, .roster-cal-day-disabled { width: calc(100% - 8px); height: auto; aspect-ratio: 1 / 1; margin: 4px; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 14px; line-height: 1; box-sizing: border-box; }
+.roster-cal-day { border: none; background: #f9fafb; color: #111827; cursor: pointer; }
 .roster-cal-day:hover { background: #f3f4f6; }
-.roster-cal-cell.today .roster-cal-day { background: #FFEEF0; border-color: #FFC4CC; }
+.roster-cal-day-disabled { border: none; }
+
+/* 其他狀態（選取、假日、值班徽章等，視資料有無） */
+.roster-cal-cell.selected .roster-cal-day { outline: 2px solid #fca5a5; }
+
+/* 日期列與新增按鈕列 */
+.roster-datebar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+/* 表格寬度超過時可水平捲動 */
+.roster-list { min-width: 640px; }
+
+/* 新增班表彈窗日期選擇格 */
+.pick-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 6px; }
+.pick-day { display: flex; align-items: center; justify-content: center; height: 32px; border-radius: 8px; background: #f9fafb; color: #111827; border: 1px solid #e5e7eb; cursor: pointer; font-size: 14px; }
+.pick-day:hover { background: #f3f4f6; }
+.pick-day.work-selected { background: #dbe9ff; border-color: #bcd3ff; }
+.pick-day.duty-selected { background: #fff3a5; border-color: #ffe58f; }
+.roster-cal-duty { display: inline-block; margin-top: 4px; padding: 2px 6px; font-size: 12px; color: #6b4e00; background: #fff3a5; border: 1px solid #ffe58f; border-radius: 999px; }
