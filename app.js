@@ -2785,7 +2785,7 @@ let firebaseApp, auth, db, functionsApp;
             </select>
           </div>
           <div class="roster-row roster-b">
-            <div id="rosterCalendar" class="roster-calendar" aria-live="polite">月曆</div>
+            <div id="rosterCalendar" class="roster-calendar" aria-live="polite"></div>
           </div>
           <div class="roster-row roster-c">
             <div id="rosterInfo" class="roster-info"></div>
@@ -2849,7 +2849,7 @@ let firebaseApp, auth, db, functionsApp;
               <button id="rosterNextMonth" class="btn" aria-label="下一月">▶</button>
             </div>
           `;
-          const tableHeader = `
+          const tableHtml = `
             <table class="roster-cal-table" aria-label="${monthLabel(date)}">
               <thead><tr>${weekdayLabels.map((w) => `<th scope="col">${w}</th>`).join("")}</tr></thead>
               <tbody>
@@ -2859,8 +2859,9 @@ let firebaseApp, auth, db, functionsApp;
                       `<tr>${r
                         .map((c) => {
                           const isToday = isSameMonth && String(today.getDate()) === c;
-                          const cls = ["roster-cal-cell", c ? "" : "empty", isToday ? "today" : ""].filter(Boolean).join(" ");
-                          return `<td class="${cls}" data-day="${c || ""}">${c || ""}</td>`;
+                          const cellCls = ["roster-cal-cell", c ? "" : "empty", isToday ? "today" : ""].filter(Boolean).join(" ");
+                          if (!c) return `<td class="${cellCls}"></td>`;
+                          return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${c}">${c}</button></td>`;
                         })
                         .join("")}</tr>`
                   )
@@ -2868,8 +2869,21 @@ let firebaseApp, auth, db, functionsApp;
               </tbody>
             </table>
           `;
-          calendarRoot.innerHTML = headerHtml + tableHeader;
+          calendarRoot.innerHTML = headerHtml + tableHtml;
 
+          // 日期按鈕事件：更新右側資訊
+          calendarRoot.addEventListener("click", (e) => {
+            const btn = e.target.closest(".roster-cal-day");
+            if (!btn) return;
+            const day = btn.dataset.day;
+            if (!day) return;
+            const y = viewDate.getFullYear();
+            const m = viewDate.getMonth();
+            const d = new Date(y, m, parseInt(day, 10));
+            const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            const infoEl = document.getElementById("rosterInfo");
+            if (infoEl) infoEl.textContent = `日期：${ymd}`;
+          });
           const prevBtn = document.getElementById("rosterPrevMonth");
           const nextBtn = document.getElementById("rosterNextMonth");
           prevBtn?.addEventListener("click", () => {
@@ -3316,6 +3330,98 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
           opt.textContent = a.name || a.email || a.id;
           sel.appendChild(opt);
         });
+      }
+
+      // 月曆：預設當月，提供上一月/下一月切換
+      const calendarRoot = document.getElementById("rosterCalendar");
+      if (calendarRoot) {
+        let viewDate = new Date(dt.getFullYear(), dt.getMonth(), 1);
+
+        const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
+
+        function monthLabel(date) {
+          return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, "0")}月`;
+        }
+        function daysInMonth(date) {
+          const y = date.getFullYear();
+          const m = date.getMonth();
+          return new Date(y, m + 1, 0).getDate();
+        }
+        function firstWeekday(date) {
+          return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+        }
+        function renderMonth(date) {
+          const totalDays = daysInMonth(date);
+          const startPad = firstWeekday(date);
+          const cells = [];
+          for (let i = 0; i < startPad; i++) cells.push("");
+          for (let d = 1; d <= totalDays; d++) cells.push(String(d));
+          while (cells.length % 7 !== 0) cells.push("");
+
+          const rows = [];
+          for (let i = 0; i < cells.length; i += 7) {
+            rows.push(cells.slice(i, i + 7));
+          }
+
+          const today = new Date();
+          const isSameMonth = today.getFullYear() === date.getFullYear() && today.getMonth() === date.getMonth();
+
+          const headerHtml = `
+            <div class="roster-cal-header" role="group" aria-label="月曆導航">
+              <button id="rosterPrevMonth" class="btn" aria-label="上一月">◀</button>
+              <div class="roster-cal-title" aria-live="polite">${monthLabel(date)}</div>
+              <button id="rosterNextMonth" class="btn" aria-label="下一月">▶</button>
+            </div>
+          `;
+          const tableHeader = `
+            <table class="roster-cal-table" aria-label="${monthLabel(date)}">
+              <thead><tr>${weekdayLabels.map((w) => `<th scope="col">${w}</th>`).join("")}</tr></thead>
+              <tbody>
+                ${rows
+                  .map(
+                    (r) =>
+                      `<tr>${r
+                        .map((c) => {
+                          const isToday = isSameMonth && String(today.getDate()) === c;
+                          const cellCls = ["roster-cal-cell", c ? "" : "empty", isToday ? "today" : ""].filter(Boolean).join(" ");
+                          if (!c) return `<td class="${cellCls}"></td>`;
+                          return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${c}">${c}</button></td>`;
+                        })
+                        .join("")}</tr>`
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          `;
+          calendarRoot.innerHTML = headerHtml + tableHeader;
+
+          const prevBtn = document.getElementById("rosterPrevMonth");
+          const nextBtn = document.getElementById("rosterNextMonth");
+          prevBtn?.addEventListener("click", () => {
+            viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1);
+            renderMonth(viewDate);
+          });
+          nextBtn?.addEventListener("click", () => {
+            viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+            renderMonth(viewDate);
+          });
+
+          // 日期按鈕事件：更新右側資訊
+          calendarRoot.addEventListener("click", (e) => {
+            const btn = e.target.closest(".roster-cal-day");
+            if (!btn) return;
+            const day = btn.dataset.day;
+            if (!day) return;
+            const y = viewDate.getFullYear();
+            const m = viewDate.getMonth();
+            const d = new Date(y, m, parseInt(day, 10));
+            const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            const infoEl = document.getElementById("rosterInfo");
+            if (infoEl) infoEl.textContent = `日期：${ymd}`;
+          });
+        }
+
+        renderMonth(viewDate);
       }
     }
   }
