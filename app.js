@@ -47,6 +47,7 @@ const userPhotoEl = document.getElementById("userPhoto");
 const subTabsEl = document.getElementById("subTabs");
 const homeHero = document.getElementById("homeHero");
 const homeHeroPhoto = document.getElementById("homeHeroPhoto");
+// 移除 hero-crop：不再需要 F 行底部裁切顯示
 // 首頁：A/B/C/D/E 堆疊容器
 const homeHeaderStack = document.getElementById("homeHeaderStack");
 // 首頁：地圖覆蓋層
@@ -589,7 +590,20 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
       // 確認後不觸發設定頁重新渲染，避免流程被中斷
       refreshOnSubmit: false,
       onSubmit: async () => {
-        resolve({ lat: currentLat, lng: currentLng });
+        // 計算目前位置是否於打卡範圍內（公尺）
+        const isNum = (v) => typeof v === 'number' && !isNaN(v);
+        const toRad = (deg) => deg * Math.PI / 180;
+        let inRadius = false;
+        if (isNum(currentLat) && isNum(currentLng) && isNum(target.lat) && isNum(target.lng)) {
+          const R = 6371000;
+          const dLat = toRad(target.lat - currentLat);
+          const dLng = toRad(target.lng - currentLng);
+          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(currentLat)) * Math.cos(toRad(target.lat)) * Math.sin(dLng/2)**2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const distance = R * c;
+          inRadius = distance <= (Number(targetRadius) || 100);
+        }
+        resolve({ lat: currentLat, lng: currentLng, inRadius });
         return true;
       },
       afterRender: async ({ body, footer }) => {
@@ -953,6 +967,7 @@ function showProfileModal(user, role) {
         if (typeof payload.photoUrl === "string") {
           if (userPhotoEl) userPhotoEl.src = payload.photoUrl;
           if (homeHeroPhoto) homeHeroPhoto.src = payload.photoUrl;
+          try { const src = homeHeroPhoto?.src || ""; if (homeHeroCrop) { homeHeroCrop.style.backgroundImage = src ? `url(${src})` : ""; } } catch {}
         }
         if (typeof payload.name === "string") userNameEl.textContent = payload.name ? `歡迎~ ${payload.name}` : userNameEl.textContent;
         return true;
@@ -2425,7 +2440,7 @@ let firebaseApp, auth, db, functionsApp;
           else if (typeof val === 'string') dt = new Date(val);
           else dt = new Date();
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
-          if (gRow) gRow.textContent = `${dateStr} ${d.locationName || ''} ${d.status || ''}`.trim();
+          if (gRow) gRow.textContent = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
           const label = d.status || '';
           const mapLabelToKey = (s) => {
             switch (s) {
@@ -2947,7 +2962,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       targetRadius: selectedLocation.radiusMeters ?? 100,
     });
     if (!viewerRes) return; // 使用者取消
-    const lat = viewerRes?.lat; const lng = viewerRes?.lng;
+    const lat = viewerRes?.lat; const lng = viewerRes?.lng; const inRadius = !!viewerRes?.inRadius;
     const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
 
     // 3) 自拍與留言（浮水印三列）
@@ -2987,7 +3002,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
             const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
             const nameElText = (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '');
             const line1 = `${dateStr} ${nameElText || '使用者'}`;
-            const line2 = `${hasCoords ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '座標未知'} ${statusLabel}`;
+            const line2 = `${hasCoords ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '座標未知'} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
             const line3 = msg || '';
             const x = pad; let y = canvas.height - pad*6.5;
             ctx.fillText(line1, x, y); y += pad*2.2;
@@ -3080,6 +3095,12 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
               captured = canvas.toDataURL('image/jpeg', 0.92);
               preview.src = captured;
               if (submitBtn) { submitBtn.disabled = false; submitBtn.title = ''; }
+              // 拍照完成後立即關閉相機並隱藏影片預覽
+              try { stream?.getTracks?.().forEach((t) => t.stop()); } catch {}
+              video.srcObject = null;
+              try { video.pause?.(); } catch {}
+              stream = null;
+              video.style.display = 'none';
             } catch (e) {
               alert(`拍照失敗：${e?.message || e}`);
             }
@@ -3107,6 +3128,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
         locationName: selectedLocation.name,
         lat: hasCoords ? lat : null,
         lng: hasCoords ? lng : null,
+        inRadius,
         message: photoDataUrl.message || "",
         photoData: photoDataUrl.photo,
         createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
@@ -3120,7 +3142,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       const now = new Date();
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
       if (gRow) {
-        gRow.textContent = `${dateStr} ${selectedLocation.name} ${statusLabel}`;
+        gRow.textContent = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
       }
       if (fRow) {
         fRow.textContent = '';

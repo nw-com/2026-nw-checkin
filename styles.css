@@ -217,7 +217,7 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .home-mid-stack {
   height: 50vh;
   display: grid;
-  grid-template-rows: 16vh 5vh 5vh 5vh 5vh 5vh 9vh; /* F–L */
+  grid-template-rows: 16vh 8vh 10vh 8vh; /* F, G, H, I */
   align-items: stretch;
   gap: 8px;
 }
@@ -227,19 +227,21 @@ button[disabled] { cursor: not-allowed; }
   justify-content: center;
   gap: 2vh;
 }
-.home-layout .home-mid-stack .row-h .btn,
-.home-layout .home-mid-stack .row-i .btn,
-.home-layout .home-mid-stack .row-j .btn,
-.home-layout .home-mid-stack .row-k .btn {
-  flex: 0 0 calc(50% - 1vh); /* 每顆按鈕半版寬（扣除間距的一半） */
-  box-sizing: border-box;
-}
-.home-layout .home-mid-stack .row-h,
-.home-layout .home-mid-stack .row-i,
-.home-layout .home-mid-stack .row-j,
-.home-layout .home-mid-stack .row-k {
+.home-layout .home-mid-stack .row-h {
   width: 100%;
-  margin-inline: auto; /* 置中（不影響 100% 滿版顯示） */
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-layout .home-mid-stack .row-h .btn {
+  width: 10vh;
+  height: 10vh;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 3.2vh;
+  font-weight: 700;
+  box-shadow: 0 0 0.8vh rgba(0,0,0,0.15);
 }
 .home-layout .home-mid-stack .row-g {
   width: 100%;
@@ -250,14 +252,16 @@ button[disabled] { cursor: not-allowed; }
   padding: 4px 8px;
   box-sizing: border-box;
 }
-.home-layout .home-mid-stack .status-text { font-size: 4vh; font-weight: 400; }
+.home-layout .home-mid-stack .status-text { font-size: 4vh; font-weight: 700; }
 .home-layout .home-mid-stack .btn {
   height: 4.2vh;
   padding: 0 2vh;
-  font-size: 2.8vh;
+  font-size: 3.2vh;
   font-weight: 300; /* 細體 */
   border-radius: 0; /* 直角 */
 }
+/* F 行現在不顯示裁切縮圖，保留容器即可 */
+/* （移除 .row-f .hero-crop 樣式） */
 /* 顏色方案 */
 .btn-green { background: #0f9d58; }
 .btn-red { background: #d93025; }
@@ -282,7 +286,7 @@ body.status-leave-request #homeStatus { color: #f57c00; }
   border-width: clamp(8px, 2vh, 24px); /* 自適應邊框厚度：最小 8px，隨視窗 2vh，上限 24px */
   box-sizing: border-box; /* 讓邊框向內縮不影響外部尺寸 */
   transition: border-color 200ms ease, box-shadow 200ms ease;
-  animation: photoPulse 2400ms infinite ease-in-out;
+  animation: heroPulseGlow 3000ms infinite ease-in-out;
 }
 body.status-work .home-hero-photo { border-color: #0f9d58; box-shadow: 0 0 20px rgba(15,157,88,0.35); }
 body.status-off .home-hero-photo { border-color: #d93025; box-shadow: 0 0 20px rgba(217,48,37,0.35); }
@@ -292,10 +296,20 @@ body.status-leave .home-hero-photo { border-color: #1e88e5; box-shadow: 0 0 20px
 body.status-return .home-hero-photo { border-color: #0b8043; box-shadow: 0 0 20px rgba(11,128,67,0.35); }
 body.status-leave-request .home-hero-photo { border-color: #f57c00; box-shadow: 0 0 20px rgba(245,124,0,0.35); }
 
-@keyframes photoPulse {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.01); }
-  100% { transform: scale(1); }
+/* 大照片向外擴張的光暈動畫（依狀態顏色） */
+body { --hero-pulse-rgb: 15,157,88; }
+body.status-work { --hero-pulse-rgb: 15,157,88; }
+body.status-off { --hero-pulse-rgb: 217,48,37; }
+body.status-out { --hero-pulse-rgb: 30,136,229; }
+body.status-arrive { --hero-pulse-rgb: 30,136,229; }
+body.status-leave { --hero-pulse-rgb: 30,136,229; }
+body.status-return { --hero-pulse-rgb: 11,128,67; }
+body.status-leave-request { --hero-pulse-rgb: 245,124,0; }
+
+@keyframes heroPulseGlow {
+  0% { box-shadow: 0 0 0 0 rgba(var(--hero-pulse-rgb), 0.40), 0 8px 24px rgba(0,0,0,0.12); }
+  50% { box-shadow: 0 0 0 36px rgba(var(--hero-pulse-rgb), 0.12), 0 8px 24px rgba(0,0,0,0.12); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--hero-pulse-rgb), 0.40), 0 8px 24px rgba(0,0,0,0.12); }
 }
 
 /* 首頁大圖：50vw，水平置中，介於頁首與頁中之間（疊加顯示） */
