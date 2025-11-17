@@ -3078,8 +3078,12 @@ let firebaseApp, auth, db, functionsApp;
                   const officerId = sel?.value || "";
                   const k = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(c).padStart(2,'0')}`;
                   const plan = (rosterPlans[officerId] || {})[k];
-                  const dutyBadge = plan?.status === "值班日" ? '<span class="roster-cal-duty">值班</span>' : '';
-                  return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${c}">${c}</button>${dutyBadge}</td>`;
+                  const dayCls = [
+                    "roster-cal-day",
+                    plan?.status === "值班日" ? "duty" : "",
+                    plan?.status === "休假日" ? "holiday" : ""
+                  ].filter(Boolean).join(" ");
+                  return `<td class="${cellCls}"><button type="button" class="${dayCls}" data-day="${c}">${c}</button></td>`;
                 }).join("")}</tr>`).join("")}
               </tbody>
             </table>`;
@@ -3240,7 +3244,15 @@ let firebaseApp, auth, db, functionsApp;
                           if (cell.kind !== "curr") {
                             return `<td class="${cellCls}"><span class="roster-cal-day-disabled">${cell.day}</span></td>`;
                           }
-                          return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${cell.day}">${cell.day}</button></td>`;
+                          const officerId = sel?.value || "";
+                          const k = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(cell.day).padStart(2,'0')}`;
+                          const plan = (rosterPlans[officerId] || {})[k];
+                          const dayCls = [
+                            "roster-cal-day",
+                            plan?.status === "值班日" ? "duty" : "",
+                            plan?.status === "休假日" ? "holiday" : ""
+                          ].filter(Boolean).join(" ");
+                          return `<td class="${cellCls}"><button type="button" class="${dayCls}" data-day="${cell.day}">${cell.day}</button></td>`;
                         })
                         .join("")}</tr>`
                   )
