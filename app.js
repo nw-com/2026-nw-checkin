@@ -2844,6 +2844,10 @@ let firebaseApp, auth, db, functionsApp;
       refreshAddVisibility();
       sel?.addEventListener("change", () => {
         refreshAddVisibility();
+        const officerId = sel?.value || "";
+        preloadRosterPlansForMonth(officerId, currentDate);
+        ensureMonthInitialized(officerId, currentDate);
+        document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
         updateRoster(currentDate);
       });
       let currentDate = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
@@ -2852,6 +2856,82 @@ let firebaseApp, auth, db, functionsApp;
       function isDefaultHoliday(d) { const wd = d.getDay(); return wd === 0 || wd === 6 || wd === 5; }
       function ymd(date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
       const rosterPlans = {}; // officerId -> { ymd -> { startTime, endTime, status } }
+      function mergeLocalRosterPlans(officerId) {
+        try {
+          const cache = JSON.parse(localStorage.getItem("rosterPlans") || "{}");
+          if (officerId && cache[officerId]) {
+            rosterPlans[officerId] = { ...(rosterPlans[officerId] || {}), ...cache[officerId] };
+          }
+        } catch {}
+      }
+      async function preloadRosterPlansForMonth(officerId, date) {
+        if (!officerId) { mergeLocalRosterPlans(officerId); return; }
+        mergeLocalRosterPlans(officerId);
+        if (db && fns.getDocs && fns.collection && fns.query && fns.where) {
+          try {
+            const q = fns.query(
+              fns.collection(db, "rosterPlans"),
+              fns.where("officerId", "==", officerId),
+              fns.where("year", "==", date.getFullYear()),
+              fns.where("month", "==", date.getMonth() + 1)
+            );
+            const snap = await fns.getDocs(q);
+            snap.forEach((docSnap) => {
+              const d = docSnap.data();
+              const key = d.date;
+              rosterPlans[officerId] = rosterPlans[officerId] || {};
+              rosterPlans[officerId][key] = { startTime: d.startTime || "", endTime: d.endTime || "", status: d.status || "" };
+            });
+            document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
+          } catch {}
+        }
+      }
+      async function ensureMonthInitialized(officerId, date) {
+        if (!officerId) return;
+        const y = date.getFullYear();
+        const m = date.getMonth();
+        const totalDays = new Date(y, m + 1, 0).getDate();
+        rosterPlans[officerId] = rosterPlans[officerId] || {};
+        for (let d = 1; d <= totalDays; d++) {
+          const key = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          if (!rosterPlans[officerId][key]) {
+            const wd = new Date(y, m, d).getDay();
+            const isWork = wd >= 1 && wd <= 4;
+            const plan = isWork
+              ? { startTime: "09:00", endTime: "17:30", status: "上班日" }
+              : { startTime: "", endTime: "", status: "休假日" };
+            await persistRosterPlan(officerId, key, plan);
+          }
+        }
+        document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
+      }
+      async function persistRosterPlan(officerId, key, plan) {
+        rosterPlans[officerId] = rosterPlans[officerId] || {};
+        rosterPlans[officerId][key] = plan;
+        try {
+          const cache = JSON.parse(localStorage.getItem("rosterPlans") || "{}");
+          cache[officerId] = cache[officerId] || {};
+          cache[officerId][key] = plan;
+          localStorage.setItem("rosterPlans", JSON.stringify(cache));
+        } catch {}
+        if (db && fns.setDoc && fns.doc && fns.serverTimestamp) {
+          try {
+            const idDoc = `${officerId}_${key}`;
+            await fns.setDoc(fns.doc(db, "rosterPlans", idDoc), {
+              officerId,
+              date: key,
+              year: Number(key.slice(0, 4)),
+              month: Number(key.slice(5, 7)),
+              day: Number(key.slice(8, 10)),
+              startTime: plan.startTime || "",
+              endTime: plan.endTime || "",
+              status: plan.status || "",
+              updatedAt: fns.serverTimestamp(),
+            }, { merge: true });
+          } catch {}
+        }
+        document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
+      }
       function updateRoster(date) {
         if (rosterDateEl) rosterDateEl.textContent = `日期：${ymd(date)}`;
         if (!rosterListBody) return;
@@ -2881,8 +2961,7 @@ let firebaseApp, auth, db, functionsApp;
             initial,
             submitText: "儲存",
             onSubmit: async (data) => {
-              rosterPlans[officerId] = rosterPlans[officerId] || {};
-              rosterPlans[officerId][key] = { startTime: data.startTime, endTime: data.endTime, status: data.status };
+              await persistRosterPlan(officerId, key, { startTime: data.startTime, endTime: data.endTime, status: data.status });
               updateRoster(date);
               return true;
             },
@@ -2893,8 +2972,7 @@ let firebaseApp, auth, db, functionsApp;
           if (!officerId) return;
           const ok = await confirmAction({ title: "刪除班表", text: "確定要刪除？此日期將標記為休假日。", confirmText: "刪除" });
           if (!ok) return;
-          rosterPlans[officerId] = rosterPlans[officerId] || {};
-          rosterPlans[officerId][key] = { startTime: "", endTime: "", status: "休假日" };
+          await persistRosterPlan(officerId, key, { startTime: "", endTime: "", status: "休假日" });
           updateRoster(date);
         });
         rosterListBody.appendChild(tr);
@@ -2919,20 +2997,18 @@ let firebaseApp, auth, db, functionsApp;
             initial: { startTime: "09:00", endTime: "17:30" },
             submitText: "儲存",
             onSubmit: async (data) => {
-              // 全量同步當月的班表：值班 > 上班 > 休假
               rosterPlans[officerId] = rosterPlans[officerId] || {};
               for (let d = 1; d <= totalDays; d++) {
                 const k = `${baseYear}-${String(baseMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
                 if (dutySelected.includes(d)) {
-                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "值班日" };
+                  await persistRosterPlan(officerId, k, { startTime: data.startTime, endTime: data.endTime, status: "值班日" });
                 } else if (workSelected.includes(d)) {
-                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "上班日" };
+                  await persistRosterPlan(officerId, k, { startTime: data.startTime, endTime: data.endTime, status: "上班日" });
                 } else {
-                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "休假日" };
+                  await persistRosterPlan(officerId, k, { startTime: data.startTime, endTime: data.endTime, status: "休假日" });
                 }
               }
               updateRoster(currentDate);
-              // 通知月曆重新渲染，顯示值班徽章
               document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
               return true;
             },
@@ -3090,8 +3166,8 @@ let firebaseApp, auth, db, functionsApp;
           calendarRoot.innerHTML = headerHtml + tableHeader;
           const prevBtn = document.getElementById("rosterPrevMonth");
           const nextBtn = document.getElementById("rosterNextMonth");
-          prevBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); renderMonth(viewDate); });
-          nextBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); renderMonth(viewDate); });
+          prevBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); const officerId = sel?.value || ""; preloadRosterPlansForMonth(officerId, viewDate); ensureMonthInitialized(officerId, viewDate); renderMonth(viewDate); });
+          nextBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); const officerId = sel?.value || ""; preloadRosterPlansForMonth(officerId, viewDate); ensureMonthInitialized(officerId, viewDate); renderMonth(viewDate); });
           // 接收班表變更事件，重新渲染徽章
           calendarRoot.addEventListener("rosterPlansChanged", () => renderMonth(viewDate));
           // 初次渲染後套用選取框（若同月）
@@ -3113,6 +3189,9 @@ let firebaseApp, auth, db, functionsApp;
             updateRoster(currentDate);
           });
         }
+        const officerIdInit = sel?.value || "";
+        preloadRosterPlansForMonth(officerIdInit, viewDate);
+        ensureMonthInitialized(officerIdInit, viewDate);
         renderMonth(viewDate);
       }
     }
@@ -3160,6 +3239,11 @@ let firebaseApp, auth, db, functionsApp;
       const calendarRoot = document.getElementById("rosterCalendar");
       if (calendarRoot) {
         let viewDate = new Date(dt.getFullYear(), dt.getMonth(), 1);
+        sel?.addEventListener("change", () => {
+          const officerId = sel?.value || "";
+          preloadRosterPlansForMonth(officerId, viewDate);
+          calendarRoot.dispatchEvent(new Event("rosterPlansChanged"));
+        });
 
         const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -3289,14 +3373,23 @@ let firebaseApp, auth, db, functionsApp;
           const nextBtn = document.getElementById("rosterNextMonth");
           prevBtn?.addEventListener("click", () => {
             viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1);
+            const officerId = sel?.value || "";
+            preloadRosterPlansForMonth(officerId, viewDate);
+            ensureMonthInitialized(officerId, viewDate);
             renderMonth(viewDate);
           });
           nextBtn?.addEventListener("click", () => {
             viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+            const officerId = sel?.value || "";
+            preloadRosterPlansForMonth(officerId, viewDate);
+            ensureMonthInitialized(officerId, viewDate);
             renderMonth(viewDate);
           });
         }
 
+        const officerIdInit2 = sel?.value || "";
+        preloadRosterPlansForMonth(officerIdInit2, viewDate);
+        ensureMonthInitialized(officerIdInit2, viewDate);
         renderMonth(viewDate);
       }
     }
