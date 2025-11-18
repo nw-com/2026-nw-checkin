@@ -444,6 +444,52 @@ function closeModal() {
   modalRoot.innerHTML = "";
 }
 
+// 首頁：打卡項目選擇彈窗（僅「上班」「外出」可點，其餘灰色不可動作）
+function openCheckinTypeSelector() {
+  return new Promise((resolve) => {
+    openModal({
+      title: "選擇打卡項目",
+      fields: [],
+      submitText: "取消",
+      refreshOnSubmit: false,
+      onSubmit: () => false,
+      afterRender: ({ body }) => {
+        const wrap = document.createElement("div");
+        wrap.style.display = "grid";
+        wrap.style.gridTemplateColumns = "1fr 1fr";
+        wrap.style.gap = "8px";
+        wrap.style.marginTop = "8px";
+        const items = [
+          { key: "work", label: "上班", cls: "btn btn-green", enabled: true },
+          { key: "off", label: "下班", cls: "btn btn-grey", enabled: false },
+          { key: "out", label: "外出", cls: "btn btn-blue", enabled: true },
+          { key: "arrive", label: "抵達", cls: "btn btn-grey", enabled: false },
+          { key: "leave", label: "離開", cls: "btn btn-grey", enabled: false },
+          { key: "return", label: "返回", cls: "btn btn-grey", enabled: false },
+        ];
+        items.forEach((it) => {
+          const b = document.createElement("button");
+          b.className = it.cls;
+          b.textContent = it.label;
+          b.style.height = "6vh";
+          b.style.fontSize = "3vh";
+          attachPressInteractions(b);
+          if (!it.enabled) {
+            b.disabled = true;
+            b.title = "尚未開放";
+          } else {
+            b.addEventListener("click", () => { resolve(it.key); closeModal(); });
+          }
+          wrap.appendChild(b);
+        });
+        body.appendChild(wrap);
+      },
+    });
+    const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
+    cancelBtn?.addEventListener('click', () => resolve(null));
+  });
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -614,52 +660,72 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         mapBox.style.height = "360px";
         mapBox.style.marginTop = "8px";
         body.appendChild(mapBox);
-        const map = new maps.Map(mapBox, { center: target, zoom: 16 });
-        // 只顯示打卡範圍，不顯示公司/社區標示
-        const circle = new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: target, radius: Number(targetRadius) || 100 });
 
-        let currentMarker = null;
-        // 使用者目前位置以藍色圓點顯示
-        const currentIconSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>\n  <circle cx='12' cy='12' r='10' fill='white' />\n  <circle cx='12' cy='12' r='7' fill='#1E90FF' />\n</svg>`;
-        const currentIcon = {
-          url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(currentIconSvg)}`,
-          scaledSize: new maps.Size(24, 24),
-          anchor: new maps.Point(12, 12),
-        };
         const info = document.createElement("div");
         info.className = "muted";
         info.style.marginTop = "8px";
         info.textContent = "定位中…";
         body.appendChild(info);
 
-        const updateCurrent = (lat, lng) => {
+        let map = null;
+        let currentMarker = null;
+        const defaultIconSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 24 24'>\n  <circle cx='12' cy='12' r='10' fill='white' />\n  <circle cx='12' cy='12' r='8' fill='#1E90FF' />\n</svg>`;
+        const defaultIcon = { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(defaultIconSvg)}`, scaledSize: new maps.Size(48, 48), anchor: new maps.Point(24, 24) };
+        const makeAvatarIcon = async () => {
+          try {
+            const src = (homeHeroPhoto && homeHeroPhoto.src) || (userPhotoEl && userPhotoEl.src) || null;
+            if (!src) return null;
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = src;
+            await new Promise((r) => { img.onload = r; img.onerror = r; });
+            const size = 48;
+            const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.save();
+            ctx.beginPath(); ctx.arc(size/2, size/2, size/2 - 2, 0, Math.PI * 2); ctx.closePath(); ctx.clip();
+            const iw = img.naturalWidth || size; const ih = img.naturalHeight || size; const ratio = iw / ih; const desired = 1;
+            let sx = 0, sy = 0, sw = iw, sh = ih;
+            if (ratio > desired) { sw = ih * desired; sx = (iw - sw) / 2; } else if (ratio < desired) { sh = iw / desired; sy = (ih - sh) / 2; }
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size);
+            ctx.restore();
+            ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(size/2, size/2, size/2 - 1.5, 0, Math.PI * 2); ctx.stroke();
+            const url = canvas.toDataURL('image/png');
+            return { url, scaledSize: new maps.Size(size, size), anchor: new maps.Point(size/2, size/2) };
+          } catch {
+            return null;
+          }
+        };
+        const iconPromise = makeAvatarIcon();
+
+        const initMap = (center) => {
+          map = new maps.Map(mapBox, { center, zoom: 18 });
+          // 顯示打卡範圍（中心為設定位置）
+          new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: target, radius: Number(targetRadius) || 100 });
+        };
+
+        const updateCurrent = async (lat, lng) => {
           currentLat = lat; currentLng = lng;
           info.textContent = `目前位置：${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+          if (!map) initMap({ lat, lng }); else { map.setCenter({ lat, lng }); map.setZoom(18); }
           if (!currentMarker) {
-            currentMarker = new maps.Marker({ position: { lat, lng }, map, draggable: false, title: "目前位置", icon: currentIcon, zIndex: 1000 });
+            const icon = (await iconPromise) || defaultIcon;
+            currentMarker = new maps.Marker({ position: { lat, lng }, map, draggable: false, title: "目前位置", icon, zIndex: 1000 });
           } else {
             currentMarker.setPosition({ lat, lng });
           }
-          // 讓視野能看到目標與目前位置（首次定位時調整）
-          try {
-            const bounds = new maps.LatLngBounds();
-            bounds.extend(target);
-            bounds.extend({ lat, lng });
-            map.fitBounds(bounds);
-            const listener = maps.event.addListenerOnce(map, 'bounds_changed', () => {
-              if (map.getZoom() > 18) map.setZoom(18);
-            });
-          } catch {}
         };
 
-        // 初次定位
+        // 先嘗試取得目前位置，成功後以目前位置為地圖初始中心；失敗才以設定位置為中心
         if ("geolocation" in navigator) {
           navigator.geolocation.getCurrentPosition(
             (pos) => { updateCurrent(pos.coords.latitude, pos.coords.longitude); },
-            (err) => { info.textContent = `定位失敗：${err?.message || err}`; },
+            () => { initMap(target); info.textContent = "定位失敗，已顯示打卡範圍"; },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
           );
         } else {
+          initMap(target);
           info.textContent = "此裝置不支援定位";
         }
 
@@ -2844,10 +2910,6 @@ let firebaseApp, auth, db, functionsApp;
       refreshAddVisibility();
       sel?.addEventListener("change", () => {
         refreshAddVisibility();
-        const officerId = sel?.value || "";
-        preloadRosterPlansForMonth(officerId, currentDate);
-        ensureMonthInitialized(officerId, currentDate);
-        document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
         updateRoster(currentDate);
       });
       let currentDate = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
@@ -2856,82 +2918,6 @@ let firebaseApp, auth, db, functionsApp;
       function isDefaultHoliday(d) { const wd = d.getDay(); return wd === 0 || wd === 6 || wd === 5; }
       function ymd(date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
       const rosterPlans = {}; // officerId -> { ymd -> { startTime, endTime, status } }
-      function mergeLocalRosterPlans(officerId) {
-        try {
-          const cache = JSON.parse(localStorage.getItem("rosterPlans") || "{}");
-          if (officerId && cache[officerId]) {
-            rosterPlans[officerId] = { ...(rosterPlans[officerId] || {}), ...cache[officerId] };
-          }
-        } catch {}
-      }
-      async function preloadRosterPlansForMonth(officerId, date) {
-        if (!officerId) { mergeLocalRosterPlans(officerId); return; }
-        mergeLocalRosterPlans(officerId);
-        if (db && fns.getDocs && fns.collection && fns.query && fns.where) {
-          try {
-            const q = fns.query(
-              fns.collection(db, "rosterPlans"),
-              fns.where("officerId", "==", officerId),
-              fns.where("year", "==", date.getFullYear()),
-              fns.where("month", "==", date.getMonth() + 1)
-            );
-            const snap = await fns.getDocs(q);
-            snap.forEach((docSnap) => {
-              const d = docSnap.data();
-              const key = d.date;
-              rosterPlans[officerId] = rosterPlans[officerId] || {};
-              rosterPlans[officerId][key] = { startTime: d.startTime || "", endTime: d.endTime || "", status: d.status || "" };
-            });
-            document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
-          } catch {}
-        }
-      }
-      async function ensureMonthInitialized(officerId, date) {
-        if (!officerId) return;
-        const y = date.getFullYear();
-        const m = date.getMonth();
-        const totalDays = new Date(y, m + 1, 0).getDate();
-        rosterPlans[officerId] = rosterPlans[officerId] || {};
-        for (let d = 1; d <= totalDays; d++) {
-          const key = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-          if (!rosterPlans[officerId][key]) {
-            const wd = new Date(y, m, d).getDay();
-            const isWork = wd >= 1 && wd <= 4;
-            const plan = isWork
-              ? { startTime: "09:00", endTime: "17:30", status: "上班日" }
-              : { startTime: "", endTime: "", status: "休假日" };
-            await persistRosterPlan(officerId, key, plan);
-          }
-        }
-        document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
-      }
-      async function persistRosterPlan(officerId, key, plan) {
-        rosterPlans[officerId] = rosterPlans[officerId] || {};
-        rosterPlans[officerId][key] = plan;
-        try {
-          const cache = JSON.parse(localStorage.getItem("rosterPlans") || "{}");
-          cache[officerId] = cache[officerId] || {};
-          cache[officerId][key] = plan;
-          localStorage.setItem("rosterPlans", JSON.stringify(cache));
-        } catch {}
-        if (db && fns.setDoc && fns.doc && fns.serverTimestamp) {
-          try {
-            const idDoc = `${officerId}_${key}`;
-            await fns.setDoc(fns.doc(db, "rosterPlans", idDoc), {
-              officerId,
-              date: key,
-              year: Number(key.slice(0, 4)),
-              month: Number(key.slice(5, 7)),
-              day: Number(key.slice(8, 10)),
-              startTime: plan.startTime || "",
-              endTime: plan.endTime || "",
-              status: plan.status || "",
-              updatedAt: fns.serverTimestamp(),
-            }, { merge: true });
-          } catch {}
-        }
-        document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
-      }
       function updateRoster(date) {
         if (rosterDateEl) rosterDateEl.textContent = `日期：${ymd(date)}`;
         if (!rosterListBody) return;
@@ -2961,7 +2947,8 @@ let firebaseApp, auth, db, functionsApp;
             initial,
             submitText: "儲存",
             onSubmit: async (data) => {
-              await persistRosterPlan(officerId, key, { startTime: data.startTime, endTime: data.endTime, status: data.status });
+              rosterPlans[officerId] = rosterPlans[officerId] || {};
+              rosterPlans[officerId][key] = { startTime: data.startTime, endTime: data.endTime, status: data.status };
               updateRoster(date);
               return true;
             },
@@ -2972,7 +2959,8 @@ let firebaseApp, auth, db, functionsApp;
           if (!officerId) return;
           const ok = await confirmAction({ title: "刪除班表", text: "確定要刪除？此日期將標記為休假日。", confirmText: "刪除" });
           if (!ok) return;
-          await persistRosterPlan(officerId, key, { startTime: "", endTime: "", status: "休假日" });
+          rosterPlans[officerId] = rosterPlans[officerId] || {};
+          rosterPlans[officerId][key] = { startTime: "", endTime: "", status: "休假日" };
           updateRoster(date);
         });
         rosterListBody.appendChild(tr);
@@ -2997,18 +2985,20 @@ let firebaseApp, auth, db, functionsApp;
             initial: { startTime: "09:00", endTime: "17:30" },
             submitText: "儲存",
             onSubmit: async (data) => {
+              // 全量同步當月的班表：值班 > 上班 > 休假
               rosterPlans[officerId] = rosterPlans[officerId] || {};
               for (let d = 1; d <= totalDays; d++) {
                 const k = `${baseYear}-${String(baseMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
                 if (dutySelected.includes(d)) {
-                  await persistRosterPlan(officerId, k, { startTime: data.startTime, endTime: data.endTime, status: "值班日" });
+                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "值班日" };
                 } else if (workSelected.includes(d)) {
-                  await persistRosterPlan(officerId, k, { startTime: data.startTime, endTime: data.endTime, status: "上班日" });
+                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "上班日" };
                 } else {
-                  await persistRosterPlan(officerId, k, { startTime: data.startTime, endTime: data.endTime, status: "休假日" });
+                  rosterPlans[officerId][k] = { startTime: data.startTime, endTime: data.endTime, status: "休假日" };
                 }
               }
               updateRoster(currentDate);
+              // 通知月曆重新渲染，顯示值班徽章
               document.getElementById("rosterCalendar")?.dispatchEvent(new Event("rosterPlansChanged"));
               return true;
             },
@@ -3154,20 +3144,16 @@ let firebaseApp, auth, db, functionsApp;
                   const officerId = sel?.value || "";
                   const k = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(c).padStart(2,'0')}`;
                   const plan = (rosterPlans[officerId] || {})[k];
-                  const dayCls = [
-                    "roster-cal-day",
-                    plan?.status === "值班日" ? "duty" : "",
-                    plan?.status === "休假日" ? "holiday" : ""
-                  ].filter(Boolean).join(" ");
-                  return `<td class="${cellCls}"><button type="button" class="${dayCls}" data-day="${c}">${c}</button></td>`;
+                  const dutyBadge = plan?.status === "值班日" ? '<span class="roster-cal-duty">值班</span>' : '';
+                  return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${c}">${c}</button>${dutyBadge}</td>`;
                 }).join("")}</tr>`).join("")}
               </tbody>
             </table>`;
           calendarRoot.innerHTML = headerHtml + tableHeader;
           const prevBtn = document.getElementById("rosterPrevMonth");
           const nextBtn = document.getElementById("rosterNextMonth");
-          prevBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); const officerId = sel?.value || ""; preloadRosterPlansForMonth(officerId, viewDate); ensureMonthInitialized(officerId, viewDate); renderMonth(viewDate); });
-          nextBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); const officerId = sel?.value || ""; preloadRosterPlansForMonth(officerId, viewDate); ensureMonthInitialized(officerId, viewDate); renderMonth(viewDate); });
+          prevBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); renderMonth(viewDate); });
+          nextBtn?.addEventListener("click", () => { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); renderMonth(viewDate); });
           // 接收班表變更事件，重新渲染徽章
           calendarRoot.addEventListener("rosterPlansChanged", () => renderMonth(viewDate));
           // 初次渲染後套用選取框（若同月）
@@ -3189,9 +3175,6 @@ let firebaseApp, auth, db, functionsApp;
             updateRoster(currentDate);
           });
         }
-        const officerIdInit = sel?.value || "";
-        preloadRosterPlansForMonth(officerIdInit, viewDate);
-        ensureMonthInitialized(officerIdInit, viewDate);
         renderMonth(viewDate);
       }
     }
@@ -3239,11 +3222,6 @@ let firebaseApp, auth, db, functionsApp;
       const calendarRoot = document.getElementById("rosterCalendar");
       if (calendarRoot) {
         let viewDate = new Date(dt.getFullYear(), dt.getMonth(), 1);
-        sel?.addEventListener("change", () => {
-          const officerId = sel?.value || "";
-          preloadRosterPlansForMonth(officerId, viewDate);
-          calendarRoot.dispatchEvent(new Event("rosterPlansChanged"));
-        });
 
         const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -3328,15 +3306,7 @@ let firebaseApp, auth, db, functionsApp;
                           if (cell.kind !== "curr") {
                             return `<td class="${cellCls}"><span class="roster-cal-day-disabled">${cell.day}</span></td>`;
                           }
-                          const officerId = sel?.value || "";
-                          const k = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(cell.day).padStart(2,'0')}`;
-                          const plan = (rosterPlans[officerId] || {})[k];
-                          const dayCls = [
-                            "roster-cal-day",
-                            plan?.status === "值班日" ? "duty" : "",
-                            plan?.status === "休假日" ? "holiday" : ""
-                          ].filter(Boolean).join(" ");
-                          return `<td class="${cellCls}"><button type="button" class="${dayCls}" data-day="${cell.day}">${cell.day}</button></td>`;
+                          return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${cell.day}">${cell.day}</button></td>`;
                         })
                         .join("")}</tr>`
                   )
@@ -3373,23 +3343,14 @@ let firebaseApp, auth, db, functionsApp;
           const nextBtn = document.getElementById("rosterNextMonth");
           prevBtn?.addEventListener("click", () => {
             viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1);
-            const officerId = sel?.value || "";
-            preloadRosterPlansForMonth(officerId, viewDate);
-            ensureMonthInitialized(officerId, viewDate);
             renderMonth(viewDate);
           });
           nextBtn?.addEventListener("click", () => {
             viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
-            const officerId = sel?.value || "";
-            preloadRosterPlansForMonth(officerId, viewDate);
-            ensureMonthInitialized(officerId, viewDate);
             renderMonth(viewDate);
           });
         }
 
-        const officerIdInit2 = sel?.value || "";
-        preloadRosterPlansForMonth(officerIdInit2, viewDate);
-        ensureMonthInitialized(officerIdInit2, viewDate);
         renderMonth(viewDate);
       }
     }
@@ -3652,7 +3613,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
           video.autoplay = true; video.playsInline = true; video.muted = true;
           video.style.width = '100%';
           video.style.height = '';
-          video.style.aspectRatio = '9 / 16';
+          video.style.aspectRatio = '4 / 6';
           video.style.objectFit = 'cover';
           video.style.background = '#000';
           video.style.borderRadius = '8px';
@@ -3676,7 +3637,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
             </svg>`;
           const preview = document.createElement('img');
           preview.style.width = '100%';
-          preview.style.aspectRatio = '9 / 16';
+          preview.style.aspectRatio = '4 / 6';
           preview.style.objectFit = 'cover';
           preview.style.marginTop = '8px';
           preview.alt = '預覽照片';
@@ -3700,8 +3661,8 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
             try {
               const track = stream?.getVideoTracks?.()[0];
               const settings = track?.getSettings?.() || {};
-              // 以影片的原生尺寸為優先，並裁切成 9:16 輸出
-              const desiredRatio = 9/16;
+              // 以影片的原生尺寸為優先，並裁切成 4:6 輸出
+              const desiredRatio = 4/6;
               const sw = Math.max(1, video.videoWidth || settings.width || 1280);
               const sh = Math.max(1, video.videoHeight || settings.height || 720);
               const srcRatio = sw / sh;
@@ -3718,7 +3679,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
               const tw = sWidth; const th = sHeight;
               const canvas = document.createElement('canvas'); canvas.width = tw; canvas.height = th;
               const ctx = canvas.getContext('2d');
-              // 將影片畫面裁切中心區塊，輸出為 9:16
+              // 將影片畫面裁切中心區塊，輸出為 4:6
               ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tw, th);
               captured = canvas.toDataURL('image/jpeg', 0.92);
               preview.src = captured;
@@ -3788,7 +3749,15 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
 
 // 將「上班」按鈕改為啟動完整打卡流程
 btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
- btnStart?.addEventListener("click", () => startCheckinFlow("work", "打卡"));
+ btnStart?.addEventListener("click", async () => {
+  const type = await openCheckinTypeSelector();
+  if (!type) return;
+  if (type === "work") {
+    await startCheckinFlow("work", "上班");
+  } else if (type === "out") {
+    await startCheckinFlow("out", "外出");
+  }
+});
   // 打卡分頁內容渲染（子分頁）
   function renderCheckinContent(label) {
     const container = document.getElementById("checkinContent");
