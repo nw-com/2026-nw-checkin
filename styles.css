@@ -186,8 +186,6 @@ button[disabled] { cursor: not-allowed; }
 /* 頁尾分頁按鈕 hover/active/pressed 效果 */
 .tab-btn:hover { background: #f3f4f6; }
 .tab-btn:active, .tab-btn.pressed { background: #e5e7eb; transform: translateY(1px); }
-
-/* 讓角色權限隱藏能壓過 .tab-btn 的 display 設定 */
 .app-footer .tab-btn.hidden { display: none !important; }
 
 /* 頁尾圖示 */
@@ -487,7 +485,7 @@ body.status-leave-request { --hero-pulse-rgb: 245,124,0; }
 .btn { border-radius: 0; }
 #modalRoot .input { border: none; text-align: center; }
 #modalRoot select.input { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: transparent; pointer-events: auto; }
-#modalRoot select.input[data-key='role'] { pointer-events: none; }
-.app-header .home-map-overlay { position: absolute; inset: 0; z-index: 1; opacity: 0.40; pointer-events: none; }
+.app-header .home-map-overlay { position: absolute; inset: 0; z-index: 0; opacity: 0.40; pointer-events: none; }
+.app-header .header-left, .app-header .header-right, .app-header #homeHeaderStack { position: relative; z-index: 2; }
 .app-header .home-map-overlay img { width: 100%; height: 100%; object-fit: cover; }
 #modalRoot .form-row .label { display: block; width: 100%; background: #EEEEEE; font-weight: 700; text-align: center; padding: 8px; }
