@@ -174,6 +174,33 @@ function weekdayZH(d) {
   return days[d.getDay()] || "";
 }
 
+function renderHomeStatusText(str) {
+  const el = homeStatusEl;
+  if (!el) return;
+  const s = String(str || "").trim();
+  const parts = s.split(/\s+/);
+  if (parts.length >= 2) {
+    const flag = parts.pop();
+    const status = parts.pop();
+    const before = parts.join(" ");
+    const flagCls = flag === "異常" ? "bad" : "";
+    const statusCls = (() => {
+      switch (status) {
+        case "上班": return "work";
+        case "下班": return "off";
+        case "外出": return "out";
+        case "抵達": return "arrive";
+        case "離開": return "leave";
+        case "返回": return "return";
+        default: return "";
+      }
+    })();
+    el.innerHTML = `${before} <span class="status-label ${statusCls}">${status}</span> <span class="status-flag ${flagCls}">${flag}</span>`;
+  } else {
+    el.textContent = s;
+  }
+}
+
 // 每 30 秒定位更新（僅首頁且頁籤可見時）
   function startGeoRefresh() {
     stopGeoRefresh();
@@ -3052,8 +3079,8 @@ let firebaseApp, auth, db, functionsApp;
     appView.classList.toggle("home-layout", tab === "home");
     // 首頁專用大圖已停用，不顯示
     if (homeHero) homeHero.classList.add("hidden");
-    // 非首頁顯示地圖覆蓋層；首頁隱藏
-    homeMapOverlay?.classList.toggle("hidden", tab === "home");
+    // 首頁顯示地圖覆蓋層；非首頁隱藏
+    homeMapOverlay?.classList.toggle("hidden", tab !== "home");
     // 首頁：A/B/C/D/E 堆疊顯示切換
     homeHeaderStack?.classList.toggle("hidden", tab !== "home");
     if (tab === "home") { startHomeClock(); } else { stopHomeClock(); }
@@ -3623,32 +3650,6 @@ let firebaseApp, auth, db, functionsApp;
   setActiveTab(activeMainTab);
 
   // 內部功能：定位與打卡
-  function renderHomeStatusText(str) {
-    const el = homeStatusEl;
-    if (!el) return;
-    const s = String(str || "").trim();
-    const parts = s.split(/\s+/);
-    if (parts.length >= 2) {
-      const flag = parts.pop();
-      const status = parts.pop();
-      const before = parts.join(" ");
-      const flagCls = flag === "異常" ? "bad" : "";
-      const statusCls = (() => {
-        switch (status) {
-          case "上班": return "work";
-          case "下班": return "off";
-          case "外出": return "out";
-          case "抵達": return "arrive";
-          case "離開": return "leave";
-          case "返回": return "return";
-          default: return "";
-        }
-      })();
-      el.innerHTML = `${before} <span class="status-label ${statusCls}">${status}</span> <span class="status-flag ${flagCls}">${flag}</span>`;
-    } else {
-      el.textContent = s;
-    }
-  }
   function initGeolocation() {
     if (!("geolocation" in navigator)) {
       if (locationInfo) locationInfo.textContent = "此裝置不支援定位";
