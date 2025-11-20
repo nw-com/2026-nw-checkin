@@ -223,8 +223,11 @@ function renderHomeStatusText(str) {
 function stopGeoRefresh() {
   if (geoRefreshTimer) { clearInterval(geoRefreshTimer); geoRefreshTimer = null; }
 }
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && activeMainTab === 'home') startGeoRefresh(); else stopGeoRefresh();
+var activeMainTab = "home";
+window.addEventListener('load', () => {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && activeMainTab === 'home') startGeoRefresh(); else stopGeoRefresh();
+  });
 });
 
 const homeSection = document.getElementById("homeSection");
@@ -1503,13 +1506,13 @@ function showProfileModal(user, role) {
         const roleInput = body.querySelector('[data-key="role"]');
         if (roleInput) {
           roleInput.disabled = false;
-          roleInput.style.webkitAppearance = 'none';
-          roleInput.style.mozAppearance = 'none';
-          roleInput.style.appearance = 'none';
-          roleInput.style.background = 'transparent';
-          roleInput.style.pointerEvents = 'none';
-          roleInput.style.textAlign = 'center';
-          roleInput.style.border = 'none';
+          roleInput.style.webkitAppearance = '';
+          roleInput.style.mozAppearance = '';
+          roleInput.style.appearance = '';
+          roleInput.style.background = '';
+          roleInput.style.pointerEvents = '';
+          roleInput.style.textAlign = '';
+          roleInput.style.border = '';
         }
         // 「儲存」按鈕字體與「登出」一致
         // （已移除主按鈕）
@@ -2719,6 +2722,7 @@ if (!isConfigReady()) {
 
 // ===== 4) 動態載入 Firebase 模組並初始化 =====
 let firebaseApp, auth, db, functionsApp;
+let ensureFirebasePromise = null;
 // 將常用 Firebase 函式存到外層，讓按鈕事件可即時呼叫
   let fns = {
   signInWithEmailAndPassword: null,
@@ -2741,17 +2745,26 @@ let firebaseApp, auth, db, functionsApp;
   async function ensureFirebase() {
   if (!isConfigReady()) return;
   if (firebaseInitialized && auth && db) { return; }
-  const [
-    { initializeApp },
-    { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
-    { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp, query, where, orderBy, limit },
-    { getFunctions, httpsCallable },
-  ] = await Promise.all([
-    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
-    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
-    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-lite.js"),
-    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js"),
-  ]);
+  if (ensureFirebasePromise) { return ensureFirebasePromise; }
+  ensureFirebasePromise = (async () => {
+    const [
+      { initializeApp },
+      { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
+      { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp, query, where, orderBy, limit }
+    ] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
+      import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-lite.js"),
+    ]);
+    let getFunctions = null;
+    let httpsCallable = null;
+    try {
+      const mod = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js");
+      getFunctions = mod.getFunctions;
+      httpsCallable = mod.httpsCallable;
+    } catch (err) {
+      console.warn("載入 Firebase Functions 模組失敗（忽略並持續初始化）：", err);
+    }
 
   // 初始化 Firebase
   firebaseApp = initializeApp(FIREBASE_CONFIG);
@@ -2759,7 +2772,7 @@ let firebaseApp, auth, db, functionsApp;
   // Firestore Lite：使用 REST 請求，不建立 WebChannel/Listen 連線
   db = getFirestore(firebaseApp);
   // 明確指定雲端函式區域，避免跨區造成呼叫錯誤或 CORS 問題
-  functionsApp = getFunctions(firebaseApp, "us-central1");
+  functionsApp = getFunctions ? getFunctions(firebaseApp, "us-central1") : null;
 
   // 將函式指派到外層供事件使用
   fns.signInWithEmailAndPassword = signInWithEmailAndPassword;
@@ -2930,26 +2943,11 @@ let firebaseApp, auth, db, functionsApp;
     appView.classList.add("hidden");
     emailSignInBtn.disabled = true;
   }
+  })();
+  return ensureFirebasePromise;
+}
 
-  // 以 REST 方式建立 Firebase Auth 帳號（不會切換目前登入狀態）
-  async function createAuthUserViaRest(email, password) {
-    const apiKey = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) || null;
-    if (!apiKey) throw new Error("缺少 Firebase apiKey");
-    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, returnSecureToken: false }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = data?.error?.message || res.statusText || "建立使用者失敗";
-      throw new Error(msg);
-    }
-    return { uid: data.localId };
-  }
-
-  // 分頁切換
+// 分頁切換
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   });
@@ -2962,7 +2960,7 @@ let firebaseApp, auth, db, functionsApp;
         { key: 'reason', label: '事由', type: 'select', options: [
           { value: '病假', label: '病假' },
           { value: '事假', label: '事假' },
-          { value: '其他', label: '其他(自定義)' },
+          { value: '其他', label: '其他' },
         ] },
         { key: 'reasonOther', label: '自定義事由', type: 'text' },
         { key: 'datetime', label: '日期時間', type: 'datetime-local', placeholder: '請選擇日期時間' },
@@ -3904,9 +3902,25 @@ let firebaseApp, auth, db, functionsApp;
       if (checkinResult) checkinResult.textContent = `打卡失敗：${err?.message || err}`;
     }
   }
-}
 
 // ===== 5) 事件綁定（即使首次載入尚未初始化，也能觸發） =====
+// 以 REST 方式建立 Firebase Auth 帳號（不會切換目前登入狀態）
+async function createAuthUserViaRest(email, password) {
+  const apiKey = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) || null;
+  if (!apiKey) throw new Error("缺少 Firebase apiKey");
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, returnSecureToken: false }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.error?.message || res.statusText || "建立使用者失敗";
+    throw new Error(msg);
+  }
+  return { uid: data.localId };
+}
 emailSignInBtn?.addEventListener("click", async () => {
   const email = emailInput.value.trim();
   const password = passwordInput.value;
@@ -3947,7 +3961,6 @@ const SUB_TABS = {
   settings: ["一般", "帳號", "社區", "規則", "系統"],
 };
 
-let activeMainTab = "home";
 let activeSubTab = null;
 // ===== 首頁狀態切換（F–K） =====
 function setHomeStatus(key, label) {
@@ -4374,7 +4387,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const mapBtn = document.createElement('button');
               mapBtn.className = 'btn btn-blue';
               mapBtn.type = 'button';
-              mapBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;"><path d="M3 6l7-3 7 3 4-2v14l-4 2-7-3-7 3V6z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>地圖`;
+              mapBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;"><path d="M12 2c-3.866 0-7 3.134-7 7 0 5.25 7 13 7 13s7-7.75 7-13c0-3.866-3.134-7-7-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="9" r="2" stroke="currentColor" stroke-width="2"/></svg>地圖`;
               mapBtn.style.borderRadius = '0';
               attachPressInteractions(mapBtn);
               mapBtn.disabled = !(typeof r.lat === 'number' && typeof r.lng === 'number');
