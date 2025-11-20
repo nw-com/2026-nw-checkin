@@ -272,6 +272,8 @@ attachPressInteractions(document.getElementById("checkinBtn"));
 attachPressInteractions(document.getElementById("emailSignIn"));
 attachPressInteractions(document.getElementById("applyAccountBtn"));
 attachPressInteractions(togglePasswordBtn);
+attachPressInteractions(btnLeaveRequest);
+attachPressInteractions(btnMakeup);
 
 // 顯示/隱藏密碼
 if (togglePasswordBtn) {
@@ -1334,7 +1336,7 @@ function showProfileModal(user, role) {
   };
   openModal({
     title: "個人資訊",
-    submitText: "儲存",
+    submitText: "關閉",
     initial,
     fields: [
       { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})), readonly: true },
@@ -1345,32 +1347,7 @@ function showProfileModal(user, role) {
       { key: "monthlyPoints", label: "本月計點", type: "text", readonly: true },
       { key: "notifications", label: "通知", type: "text", readonly: true },
     ],
-    onSubmit: async (data) => {
-      try {
-        if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
-        if (!user?.uid) throw new Error("使用者未登入");
-        const payload = {};
-        if (typeof data.photoUrl === "string") payload.photoUrl = data.photoUrl;
-        if (typeof data.name === "string") payload.name = data.name;
-        if (typeof data.email === "string") payload.email = data.email;
-        if (typeof data.phone === "string") payload.phone = data.phone;
-        // 角色僅限系統管理員可變更
-        if (appState.currentUserRole === "系統管理員" && typeof data.role === "string") payload.role = data.role;
-        if (Object.keys(payload).length === 0) return true;
-        if (typeof fns.serverTimestamp === "function") payload.updatedAt = fns.serverTimestamp();
-        await fns.setDoc(fns.doc(db, "users", user.uid), payload, { merge: true });
-        if (typeof payload.photoUrl === "string") {
-          if (userPhotoEl) userPhotoEl.src = payload.photoUrl;
-          if (homeHeroPhoto) homeHeroPhoto.src = payload.photoUrl;
-          try { const src = homeHeroPhoto?.src || ""; if (homeHeroCrop) { homeHeroCrop.style.backgroundImage = src ? `url(${src})` : ""; } } catch {}
-        }
-        if (typeof payload.name === "string") userNameEl.textContent = payload.name ? `歡迎~ ${payload.name}` : userNameEl.textContent;
-        return true;
-      } catch (e) {
-        alert("儲存個人照片失敗：" + (e?.message || e));
-        return false;
-      }
-    },
+    onSubmit: async () => true,
     afterRender: async ({ header, body, footer, inputs }) => {
       try {
         // 表單行改為預設對齊，移除水平置中；隱藏所有標籤
@@ -1382,9 +1359,9 @@ function showProfileModal(user, role) {
           const lab = row.querySelector('.label'); if (lab) lab.style.display = 'none';
         });
 
-        // 儲存按鈕啟用（允許更換照片後直接儲存）
-        const btnSubmit = footer.querySelector(".btn-primary");
-        if (btnSubmit) btnSubmit.disabled = false;
+        // 移除預設主按鈕（關閉）
+        const btnSubmit = footer.querySelector(".btn") || footer.querySelector(".btn-primary");
+        if (btnSubmit) btnSubmit.remove();
 
         // 以 Firestore 使用者文件覆蓋照片與基本資訊
         if (db && fns.doc && fns.getDoc && user?.uid) {
@@ -1410,12 +1387,62 @@ function showProfileModal(user, role) {
                   row.appendChild(preview);
                 }
                 if (photo) preview.src = photo;
+                // 大頭照旁顯示編輯小圖示
+                const editBtn = document.createElement('button');
+                editBtn.className = 'btn btn-darkgrey';
+                editBtn.type = 'button';
+                editBtn.style.marginTop = '8px';
+                editBtn.style.display = 'inline-flex';
+                editBtn.style.alignItems = 'center';
+                editBtn.style.gap = '6px';
+                editBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M14 4l6 6-9 9H5v-6l9-9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>編輯照片`;
+                attachPressInteractions(editBtn);
+                row.appendChild(editBtn);
                 if (input) {
                   input.style.display = "none";
                   input.disabled = false;
+                  const triggerSelect = () => { try { input.click(); } catch {} };
                   preview.style.cursor = 'pointer';
-                  preview.addEventListener("click", () => { input.click(); });
-                  input.addEventListener('change', () => { try { const f = input.files?.[0]; if (f) { const url = URL.createObjectURL(f); preview.src = url; if (btnSubmit) btnSubmit.disabled = false; } } catch {} });
+                  preview.addEventListener("click", triggerSelect);
+                  editBtn.addEventListener('click', triggerSelect);
+                  input.addEventListener('change', () => {
+                    try {
+                      const f = input.files?.[0];
+                      if (!f) return;
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const dataUrl = String(reader.result || '');
+                        if (!dataUrl) return;
+                        preview.src = dataUrl;
+                        // 變更後詢問是否儲存
+                        openModal({
+                          title: '確認儲存新照片',
+                          fields: [],
+                          submitText: '儲存',
+                          refreshOnSubmit: false,
+                          onSubmit: async () => {
+                            try {
+                              await ensureFirebase();
+                              if (!db || !fns.setDoc || !fns.doc) throw new Error('Firestore 未初始化');
+                              if (!user?.uid) throw new Error('使用者未登入');
+                              const payload = { photoUrl: dataUrl };
+                              if (typeof fns.serverTimestamp === 'function') payload.updatedAt = fns.serverTimestamp();
+                              await fns.setDoc(fns.doc(db, 'users', user.uid), payload, { merge: true });
+                              if (userPhotoEl) userPhotoEl.src = dataUrl;
+                              if (homeHeroPhoto) homeHeroPhoto.src = dataUrl;
+                              try { const src = homeHeroPhoto?.src || ''; if (homeHeroCrop) { homeHeroCrop.style.backgroundImage = src ? `url(${src})` : ''; } } catch {}
+                              alert('已儲存新照片');
+                              return true;
+                            } catch (e) {
+                              alert('儲存失敗：' + (e?.message || e));
+                              return false;
+                            }
+                          }
+                        });
+                      };
+                      reader.readAsDataURL(f);
+                    } catch {}
+                  });
                 }
               }
             }
@@ -1432,25 +1459,7 @@ function showProfileModal(user, role) {
             if (roleInput) roleInput.value = d.role || roleInput.value || (typeof role === "string" ? role : "一般");
 
             // 計算本月計點（checkins 集合當月筆數）
-            try {
-              if (fns.getDocs && fns.collection) {
-                const snap2 = await fns.getDocs(fns.collection(db, "checkins"));
-                let count = 0;
-                const now = new Date();
-                const ym = `${now.getFullYear()}-${now.getMonth()+1}`;
-                snap2.forEach((docSnap) => {
-                  const x = docSnap.data() || {};
-                  if (x.uid !== user.uid) return;
-                  const ts = x.createdAt;
-                  if (ts && typeof ts.toDate === "function") {
-                    const d2 = ts.toDate();
-                    const ym2 = `${d2.getFullYear()}-${d2.getMonth()+1}`;
-                    if (ym2 === ym) count++;
-                  }
-                });
-                if (monthlyInput) monthlyInput.value = String(count);
-              }
-            } catch {}
+            if (monthlyInput) monthlyInput.value = "0";
 
             // 通知顯示（若有 users 欄位）
             try {
@@ -1498,23 +1507,13 @@ function showProfileModal(user, role) {
           roleInput.style.border = 'none';
         }
         // 「儲存」按鈕字體與「登出」一致
-        const btnSubmit2 = footer.querySelector('.btn-primary') || footer.querySelector('.btn');
-        if (btnSubmit2) {
-          btnSubmit2.className = 'btn';
-          btnSubmit2.style.height = '';
-          btnSubmit2.style.fontSize = '';
-          btnSubmit2.style.display = '';
-          btnSubmit2.style.alignItems = '';
-          btnSubmit2.style.justifyContent = '';
-          btnSubmit2.style.padding = '';
-          btnSubmit2.style.width = '';
-        }
+        // （已移除主按鈕）
       } catch {}
 
       // 在視窗最下方（footer）加入登出按鈕
       try {
         const btnLogout = document.createElement("button");
-        btnLogout.className = "btn";
+        btnLogout.className = "btn btn-grey";
         btnLogout.textContent = "登出";
         attachPressInteractions(btnLogout);
         btnLogout.addEventListener("click", async () => {
@@ -2950,6 +2949,99 @@ let firebaseApp, auth, db, functionsApp;
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   });
 
+  // 請假與補卡
+  btnLeaveRequest?.addEventListener('click', () => {
+    openModal({
+      title: '請假申請',
+      fields: [
+        { key: 'reason', label: '事由', type: 'select', options: [
+          { value: '病假', label: '病假' },
+          { value: '事假', label: '事假' },
+          { value: '其他', label: '其他(自定義)' },
+        ] },
+        { key: 'reasonOther', label: '自定義事由', type: 'text' },
+        { key: 'datetime', label: '日期時間', type: 'text', placeholder: 'YYYY-MM-DD HH:mm:ss' },
+      ],
+      initial: { reason: '事假', reasonOther: '', datetime: '' },
+      submitText: '送出',
+      refreshOnSubmit: false,
+      onSubmit: async (data) => {
+        try {
+          await ensureFirebase();
+          const user = auth?.currentUser || null;
+          const reason = String(data.reason || '') === '其他' ? String(data.reasonOther || '') : String(data.reason || '');
+          const payload = {
+            uid: user?.uid || null,
+            name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, ''),
+            reason,
+            datetime: String(data.datetime || ''),
+            createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+          };
+          if (db && fns.addDoc && fns.collection) {
+            await fns.addDoc(fns.collection(db, 'leaveRequests'), payload);
+          }
+          alert('已送出請假申請');
+          return true;
+        } catch (e) {
+          alert(`送出失敗：${e?.message || e}`);
+          return false;
+        }
+      },
+      afterRender: ({ body }) => {
+        const sel = body.querySelector('[data-key="reason"]');
+        const other = body.querySelector('[data-key="reasonOther"]');
+        if (sel && other) {
+          const sync = () => { const v = sel.value; other.parentElement.style.display = (v === '其他') ? '' : 'none'; };
+          sync(); sel.addEventListener('change', sync);
+        }
+      }
+    });
+  });
+
+  btnMakeup?.addEventListener('click', () => {
+    const statusOptions = [
+      { value: '上班', label: '上班' },
+      { value: '下班', label: '下班' },
+      { value: '外出', label: '外出' },
+      { value: '抵達', label: '抵達' },
+      { value: '離開', label: '離開' },
+      { value: '返回', label: '返回' },
+    ];
+    openModal({
+      title: '補卡申請',
+      fields: [
+        { key: 'place', label: '打卡地點', type: 'text' },
+        { key: 'status', label: '狀態', type: 'select', options: statusOptions },
+        { key: 'datetime', label: '日期時間', type: 'text', placeholder: 'YYYY-MM-DD HH:mm:ss' },
+      ],
+      initial: { place: '', status: '上班', datetime: '' },
+      submitText: '送出',
+      refreshOnSubmit: false,
+      onSubmit: async (data) => {
+        try {
+          await ensureFirebase();
+          const user = auth?.currentUser || null;
+          const payload = {
+            uid: user?.uid || null,
+            name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, ''),
+            place: String(data.place || ''),
+            status: String(data.status || ''),
+            datetime: String(data.datetime || ''),
+            createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+          };
+          if (db && fns.addDoc && fns.collection) {
+            await fns.addDoc(fns.collection(db, 'makeupRequests'), payload);
+          }
+          alert('已送出補卡申請');
+          return true;
+        } catch (e) {
+          alert(`送出失敗：${e?.message || e}`);
+          return false;
+        }
+      },
+    });
+  });
+
   // 防呆：頁尾事件委派，避免個別按鈕事件失效
   const appFooter = document.querySelector('.app-footer');
   if (appFooter) {
@@ -4283,7 +4375,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               });
 
               const photoBtn = document.createElement('button');
-              photoBtn.className = 'btn btn-orange';
+              photoBtn.className = 'btn btn-green';
               photoBtn.type = 'button';
               photoBtn.innerHTML = `<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"margin-right:6px;\"><rect x=\"4\" y=\"7\" width=\"16\" height=\"12\" rx=\"2\" stroke=\"currentColor\" stroke-width=\"2\" /><path d=\"M9 7l1.5-2h3L15 7\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" /><circle cx=\"12\" cy=\"13\" r=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\" /></svg>照片`;
               photoBtn.style.borderRadius = '0';
@@ -4307,7 +4399,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               });
 
               const modifyBtn = document.createElement('button');
-              modifyBtn.className = 'btn btn-purple';
+              modifyBtn.className = 'btn btn-orange';
               modifyBtn.type = 'button';
               modifyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 4l6 6-9 9H5v-6l9-9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>申請修改`;
               modifyBtn.style.borderRadius = '0';
