@@ -3079,8 +3079,8 @@ let firebaseApp, auth, db, functionsApp;
     appView.classList.toggle("home-layout", tab === "home");
     // 首頁專用大圖已停用，不顯示
     if (homeHero) homeHero.classList.add("hidden");
-    // 首頁顯示地圖覆蓋層；非首頁隱藏
-    homeMapOverlay?.classList.toggle("hidden", tab !== "home");
+    // 所有分頁顯示地圖覆蓋層
+    homeMapOverlay?.classList.toggle("hidden", false);
     // 首頁：A/B/C/D/E 堆疊顯示切換
     homeHeaderStack?.classList.toggle("hidden", tab !== "home");
     if (tab === "home") { startHomeClock(); } else { stopHomeClock(); }
@@ -4126,7 +4126,8 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 }
               })();
               const place = r.locationName || '未知地點';
-              status.innerHTML = `打卡地點：${place} 狀態：<span class="status-label ${stCls}">${st}</span>`;
+              const flagHtml = r.inRadius === true ? ' 正常' : ' <span class="status-flag bad">異常</span>';
+              status.innerHTML = `打卡地點：${place} 狀態：<span class="status-label ${stCls}">${st}</span>${flagHtml}`;
               const dtStr = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
               const when = document.createElement('div');
               when.textContent = `時間：${dtStr}`;
