@@ -2960,9 +2960,11 @@ let firebaseApp, auth, db, functionsApp;
           { value: '其他', label: '其他(自定義)' },
         ] },
         { key: 'reasonOther', label: '自定義事由', type: 'text' },
-        { key: 'datetime', label: '日期時間', type: 'text', placeholder: 'YYYY-MM-DD HH:mm:ss' },
+        { key: 'datetime', label: '日期時間', type: 'datetime-local' },
+        { key: 'note', label: '備註', type: 'text' },
+        { key: 'attachment', label: '上傳文件', type: 'file' },
       ],
-      initial: { reason: '事假', reasonOther: '', datetime: '' },
+      initial: { reason: '事假', reasonOther: '', datetime: '', note: '' },
       submitText: '送出',
       refreshOnSubmit: false,
       onSubmit: async (data) => {
@@ -2975,6 +2977,8 @@ let firebaseApp, auth, db, functionsApp;
             name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, ''),
             reason,
             datetime: String(data.datetime || ''),
+            note: String(data.note || ''),
+            attachmentData: window.__leaveAttachmentData || '',
             createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
           };
           if (db && fns.addDoc && fns.collection) {
@@ -2994,6 +2998,18 @@ let firebaseApp, auth, db, functionsApp;
           const sync = () => { const v = sel.value; other.parentElement.style.display = (v === '其他') ? '' : 'none'; };
           sync(); sel.addEventListener('change', sync);
         }
+        const fileInput = body.querySelector('[data-key="attachment"]');
+        if (fileInput) {
+          fileInput.addEventListener('change', () => {
+            try {
+              const f = fileInput.files?.[0];
+              if (!f) { window.__leaveAttachmentData = ''; return; }
+              const reader = new FileReader();
+              reader.onload = () => { window.__leaveAttachmentData = String(reader.result || ''); };
+              reader.readAsDataURL(f);
+            } catch { window.__leaveAttachmentData = ''; }
+          });
+        }
       }
     });
   });
@@ -3007,14 +3023,21 @@ let firebaseApp, auth, db, functionsApp;
       { value: '離開', label: '離開' },
       { value: '返回', label: '返回' },
     ];
+    let defaultPlace = '';
+    try {
+      const uid = appState.currentUserId || null;
+      const acc = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
+      const companyName = acc?.companyId ? (appState.companies.find((c) => c.id === acc.companyId)?.name || '') : '';
+      defaultPlace = companyName || '';
+    } catch {}
     openModal({
       title: '補卡申請',
       fields: [
         { key: 'place', label: '打卡地點', type: 'text' },
         { key: 'status', label: '狀態', type: 'select', options: statusOptions },
-        { key: 'datetime', label: '日期時間', type: 'text', placeholder: 'YYYY-MM-DD HH:mm:ss' },
+        { key: 'datetime', label: '日期時間', type: 'datetime-local' },
       ],
-      initial: { place: '', status: '上班', datetime: '' },
+      initial: { place: defaultPlace, status: '上班', datetime: '' },
       submitText: '送出',
       refreshOnSubmit: false,
       onSubmit: async (data) => {
