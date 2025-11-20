@@ -4017,17 +4017,28 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     // 依使用者帳號與角色找出可選位置
     let options = [];
     let sourceType = "company"; // company | community
+    const uid = appState.currentUserId || null;
+    const userAccount = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
     if (adminRoles.has(userRole)) {
-      options = optionList(appState.companies);
+      // 管理類角色：僅帶入帳號所屬公司名稱（若未設定公司，才顯示全部公司以免卡關）
+      const companyId = userAccount?.companyId || null;
+      if (companyId) {
+        const co = appState.companies.find((c) => c.id === companyId) || null;
+        options = co ? [{ value: co.id, label: co.name }] : [];
+      }
+      if (!options.length) options = optionList(appState.companies);
       sourceType = "company";
     } else {
-      // 一般/勤務：優先使用使用者的 serviceCommunities；若無則顯示全部社區
-      let userAccount = null;
-      if (appState.currentUserId) {
-        userAccount = appState.accounts.find((a) => a.id === appState.currentUserId) || null;
-      }
+      // 一般/勤務：帶入帳號的服務社區（可能為多個）；若未設定則帶入該帳號公司底下的社區；再不然顯示全部社區
       const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
-      const communities = appState.communities.filter((c) => !allowedCommunityIds || allowedCommunityIds.has(c.id));
+      let communities = [];
+      if (allowedCommunityIds && allowedCommunityIds.size > 0) {
+        communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+      } else if (userAccount?.companyId) {
+        communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
+      } else {
+        communities = appState.communities.slice();
+      }
       options = communities.map((c) => ({ value: c.id, label: c.name }));
       sourceType = "community";
     }
