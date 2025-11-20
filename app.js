@@ -463,6 +463,20 @@ function closeModal() {
   modalRoot.innerHTML = "";
 }
 
+function getDeviceId() {
+  try {
+    const key = "deviceId";
+    let idv = localStorage.getItem(key);
+    if (!idv) {
+      idv = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem(key, idv);
+    }
+    return idv;
+  } catch {
+    return null;
+  }
+}
+
 // 首頁：打卡項目選擇彈窗（僅「上班」「外出」可點，其餘灰色不可動作）
 function openCheckinTypeSelector() {
   return new Promise((resolve) => {
@@ -2530,25 +2544,33 @@ let firebaseApp, auth, db, functionsApp;
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
       applyPagePermissionsForUser(user);
 
-      // 載入「最後一次打卡」並套用到首頁狀態與頁中 G
       try {
         const q = fns.query(
           fns.collection(db, "checkins"),
           fns.where("uid", "==", user.uid),
           fns.orderBy("createdAt", "desc"),
-          fns.limit(1)
+          fns.limit(50)
         );
         const snap = await fns.getDocs(q);
-        if (!snap.empty) {
-          const d = snap.docs[0].data();
-          const gRow = document.querySelector('.row-g');
+        const tzNow = nowInTZ('Asia/Taipei');
+        const d0 = new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate());
+        const d1 = new Date(d0); d1.setDate(d0.getDate() + 1);
+        let found = null;
+        snap.forEach((docSnap) => {
+          if (found) return;
+          const d = docSnap.data();
           const val = d.createdAt;
-          let dt;
-          if (val && typeof val.toDate === 'function') dt = val.toDate();
-          else if (typeof val === 'string') dt = new Date(val);
-          else dt = new Date();
+          let dt = null;
+          if (val && typeof val.toDate === 'function') dt = val.toDate(); else if (typeof val === 'string') dt = new Date(val);
+          if (!dt) return;
+          if (dt >= d0 && dt < d1) found = { data: d, dt };
+        });
+        const gRow = document.querySelector('.row-g');
+        if (found && gRow) {
+          const d = found.data;
+          const dt = found.dt;
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
-          if (gRow) gRow.textContent = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
+          gRow.textContent = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
           const label = d.status || '';
           const mapLabelToKey = (s) => {
             switch (s) {
@@ -2563,10 +2585,10 @@ let firebaseApp, auth, db, functionsApp;
             }
           };
           setHomeStatus(mapLabelToKey(label), label);
+        } else if (gRow) {
+          gRow.textContent = '';
         }
-      } catch (e) {
-        // 讀取失敗時忽略，不影響主要流程
-      }
+      } catch (e) {}
 
       // 從 Firestore 載入 users 清單，帶入帳號列表
       await loadAccountsFromFirestore();
@@ -2633,6 +2655,17 @@ let firebaseApp, auth, db, functionsApp;
   tabButtons.forEach((btn) => {
     btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
   });
+
+  // 防呆：頁尾事件委派，避免個別按鈕事件失效
+  const appFooter = document.querySelector('.app-footer');
+  if (appFooter) {
+    appFooter.addEventListener('click', (e) => {
+      const el = e.target && e.target.closest && e.target.closest('.tab-btn');
+      if (el && el.dataset && el.dataset.tab) {
+        setActiveTab(el.dataset.tab);
+      }
+    });
+  }
 
   async function loadAccountsFromFirestore() {
     if (!db || !fns.getDocs || !fns.collection) return;
@@ -3761,6 +3794,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
         inRadius,
         message: photoDataUrl.message || "",
         photoData: photoDataUrl.photo,
+        deviceId: getDeviceId(),
         createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
       };
       if (db && fns.addDoc && fns.collection) {
@@ -3804,6 +3838,76 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
     const container = document.getElementById("checkinContent");
     if (!container) return;
     container.innerHTML = "";
+    if (label === "紀錄") {
+      (async () => {
+        try {
+          await ensureFirebase();
+          const user = auth?.currentUser || null;
+          if (!user) { container.textContent = "請先登入"; return; }
+          const ref = fns.collection(db, "checkins");
+          const q = fns.query(ref, fns.where("uid", "==", user.uid), fns.orderBy("createdAt", "desc"), fns.limit(50));
+          const snap = await fns.getDocs(q);
+          const tzNow = nowInTZ('Asia/Taipei');
+          const d0 = new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate());
+          const d1 = new Date(d0); d1.setDate(d0.getDate() + 1);
+          const list = [];
+          snap.forEach((doc) => {
+            const data = doc.data();
+            let created = data.createdAt;
+            let dt = null;
+            if (created && typeof created.toDate === 'function') dt = created.toDate(); else if (typeof created === 'string') dt = new Date(created);
+            if (!dt) return;
+            if (dt >= d0 && dt < d1) list.push({ id: doc.id, ...data, dt });
+          });
+          if (!list.length) { container.textContent = "今日無打卡紀錄"; return; }
+          list.forEach((r) => {
+            const card = document.createElement("div");
+            card.style.display = "grid";
+            card.style.gridTemplateColumns = "1fr";
+            card.style.gap = "8px";
+            card.style.margin = "8px 0";
+            const status = document.createElement("div");
+            status.textContent = `狀態：${r.status || ''}`;
+            const dtStr = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
+            const when = document.createElement("div");
+            when.textContent = `時間：${dtStr}`;
+            const dev = document.createElement("div");
+            dev.textContent = `裝置ID：${r.deviceId || '未知'}`;
+            card.appendChild(status);
+            card.appendChild(when);
+            const mapImg = document.createElement("img");
+            mapImg.style.width = "100%";
+            mapImg.style.borderRadius = "8px";
+            if (typeof r.lat === 'number' && typeof r.lng === 'number') {
+              const lat = Number(r.lat).toFixed(6);
+              const lon = Number(r.lng).toFixed(6);
+              const size = "640x320";
+              const zoom = 16;
+              const marker = `markers=color:red|${lat},${lon}`;
+              mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=${zoom}&size=${size}&maptype=roadmap&${marker}&key=${GOOGLE_MAPS_API_KEY}`;
+              card.appendChild(mapImg);
+            } else {
+              const no = document.createElement("div");
+              no.textContent = "定位地圖：座標未知";
+              card.appendChild(no);
+            }
+            if (r.photoData) {
+              const photo = document.createElement("img");
+              photo.src = r.photoData;
+              photo.alt = "打卡照片";
+              photo.style.width = "100%";
+              photo.style.borderRadius = "8px";
+              card.appendChild(photo);
+            }
+            card.appendChild(dev);
+            container.appendChild(card);
+          });
+        } catch (e) {
+          container.textContent = `載入失敗：${e?.message || e}`;
+        }
+      })();
+      return;
+    }
     if (label === "班表") {
       const html = `
         <div class="roster-layout" role="region" aria-label="班表">
