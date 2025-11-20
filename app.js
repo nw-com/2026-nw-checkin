@@ -364,10 +364,12 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
     const label = document.createElement("label");
     label.className = "label";
     label.textContent = f.label;
+    label.setAttribute("lang", "zh-Hant");
     let input;
     if (f.type === "select") {
       input = document.createElement("select");
       input.className = "input";
+      input.setAttribute("lang", "zh-Hant");
       (f.options || []).forEach((opt) => {
         const o = document.createElement("option");
         o.value = opt.value;
@@ -398,6 +400,8 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
       input.className = "input";
       input.type = f.type || "text";
       input.placeholder = f.placeholder || "";
+      input.setAttribute("lang", "zh-Hant");
+      if (f.placeholder) input.setAttribute("title", f.placeholder);
       if (initial && initial[f.key] != null && f.type !== "file") input.value = initial[f.key];
       if (f.readonly) input.disabled = true;
     }
@@ -406,6 +410,7 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
     row.appendChild(input);
     // 檔案欄位預覽：初始值與即時選取預覽
     if (f.type === "file") {
+      input.setAttribute("title", "選擇檔案");
       let preview = null;
       if (initial && initial[f.key]) {
         preview = document.createElement("img");
@@ -2960,7 +2965,7 @@ let firebaseApp, auth, db, functionsApp;
           { value: '其他', label: '其他(自定義)' },
         ] },
         { key: 'reasonOther', label: '自定義事由', type: 'text' },
-        { key: 'datetime', label: '日期時間', type: 'datetime-local' },
+        { key: 'datetime', label: '日期時間', type: 'datetime-local', placeholder: '請選擇日期時間' },
         { key: 'note', label: '備註', type: 'text' },
         { key: 'attachment', label: '上傳文件', type: 'file' },
       ],
@@ -3035,7 +3040,7 @@ let firebaseApp, auth, db, functionsApp;
       fields: [
         { key: 'place', label: '打卡地點', type: 'text' },
         { key: 'status', label: '狀態', type: 'select', options: statusOptions },
-        { key: 'datetime', label: '日期時間', type: 'datetime-local' },
+        { key: 'datetime', label: '日期時間', type: 'datetime-local', placeholder: '請選擇日期時間' },
       ],
       initial: { place: defaultPlace, status: '上班', datetime: '' },
       submitText: '送出',

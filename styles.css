@@ -476,7 +476,8 @@ body.status-leave-request { --hero-pulse-rgb: 245,124,0; }
 .panel .btn { border-radius: 0; }
 .btn { border-radius: 0; }
 #modalRoot .input { border: none; text-align: center; }
-#modalRoot select.input { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: transparent; pointer-events: none; }
+#modalRoot select.input { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: transparent; pointer-events: auto; }
+#modalRoot select.input[data-key='role'] { pointer-events: none; }
 .app-header .home-map-overlay { position: absolute; inset: 0; z-index: 1; opacity: 0.40; pointer-events: none; }
 .app-header .home-map-overlay img { width: 100%; height: 100%; object-fit: cover; }
 #modalRoot .form-row .label { display: block; width: 100%; background: #EEEEEE; font-weight: 700; text-align: center; padding: 8px; }
