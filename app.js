@@ -385,14 +385,33 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
 
   const footer = document.createElement("div");
   footer.className = "modal-footer";
+  footer.style.display = "grid";
+  footer.style.gridTemplateColumns = "1fr";
+  footer.style.gap = "8px";
   const btnCancel = document.createElement("button");
   btnCancel.className = "btn";
   btnCancel.textContent = "取消";
+  btnCancel.style.borderRadius = "0";
+  btnCancel.style.height = "6vh";
+  btnCancel.style.fontSize = "3vh";
+  btnCancel.style.display = "flex";
+  btnCancel.style.alignItems = "center";
+  btnCancel.style.justifyContent = "center";
+  btnCancel.style.padding = "0";
+  btnCancel.style.width = "100%";
   attachPressInteractions(btnCancel);
   btnCancel.addEventListener("click", () => closeModal());
   const btnSubmit = document.createElement("button");
   btnSubmit.className = "btn btn-primary";
   btnSubmit.textContent = submitText;
+  btnSubmit.style.borderRadius = "0";
+  btnSubmit.style.height = "6vh";
+  btnSubmit.style.fontSize = "3vh";
+  btnSubmit.style.display = "flex";
+  btnSubmit.style.alignItems = "center";
+  btnSubmit.style.justifyContent = "center";
+  btnSubmit.style.padding = "0";
+  btnSubmit.style.width = "100%";
   attachPressInteractions(btnSubmit);
   btnSubmit.addEventListener("click", async () => {
     const data = {};
@@ -454,6 +473,8 @@ function openCheckinTypeSelector() {
       refreshOnSubmit: false,
       onSubmit: () => false,
       afterRender: ({ body }) => {
+        const footerEl = modalRoot?.querySelector('.modal-footer');
+        if (footerEl) footerEl.remove();
         const wrap = document.createElement("div");
         wrap.style.display = "grid";
         wrap.style.gridTemplateColumns = "1fr 1fr";
@@ -473,6 +494,11 @@ function openCheckinTypeSelector() {
           b.textContent = it.label;
           b.style.height = "6vh";
           b.style.fontSize = "3vh";
+          b.style.borderRadius = "0";
+          b.style.display = "flex";
+          b.style.alignItems = "center";
+          b.style.justifyContent = "center";
+          b.style.padding = "0";
           attachPressInteractions(b);
           if (!it.enabled) {
             b.disabled = true;
@@ -483,6 +509,21 @@ function openCheckinTypeSelector() {
           wrap.appendChild(b);
         });
         body.appendChild(wrap);
+        const cancel = document.createElement("button");
+        cancel.className = "btn";
+        cancel.textContent = "取消";
+        cancel.style.height = "6vh";
+        cancel.style.fontSize = "3vh";
+        cancel.style.borderRadius = "0";
+        cancel.style.display = "flex";
+        cancel.style.alignItems = "center";
+        cancel.style.justifyContent = "center";
+        cancel.style.padding = "0";
+        cancel.style.marginTop = "8px";
+        cancel.style.width = "100%";
+        attachPressInteractions(cancel);
+        cancel.addEventListener("click", () => { resolve(null); closeModal(); });
+        body.appendChild(cancel);
       },
     });
     const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
