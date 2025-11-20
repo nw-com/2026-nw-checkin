@@ -175,20 +175,20 @@ function weekdayZH(d) {
 }
 
 // 每 30 秒定位更新（僅首頁且頁籤可見時）
-function startGeoRefresh() {
-  stopGeoRefresh();
-  geoRefreshTimer = setInterval(() => {
-    if (document.visibilityState !== 'visible' || activeMainTab !== 'home') return;
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        lastCoords = pos.coords;
-        updateHomeMap();
-      }, (err) => {
-        // 忽略錯誤，保持上一筆座標
-      }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 15000 });
-    }
-  }, 30000);
-}
+  function startGeoRefresh() {
+    stopGeoRefresh();
+    geoRefreshTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((pos) => {
+          lastCoords = pos.coords;
+          updateHomeMap();
+        }, (err) => {
+          // 忽略錯誤，保持上一筆座標
+        }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 15000 });
+      }
+    }, 30000);
+  }
 function stopGeoRefresh() {
   if (geoRefreshTimer) { clearInterval(geoRefreshTimer); geoRefreshTimer = null; }
 }
@@ -493,6 +493,16 @@ function getDeviceId() {
     return null;
   }
 }
+function getDeviceNameById(id) {
+  try {
+    if (!id) return "未知裝置";
+    const my = getDeviceId();
+    if (my && id === my) return "本機";
+    return "未知裝置";
+  } catch {
+    return "未知裝置";
+  }
+}
 
 function setLastCheckin(uid, payload) {
   try {
@@ -583,14 +593,106 @@ function openCheckinTypeSelector() {
         wrap.style.gridTemplateColumns = "1fr 1fr";
         wrap.style.gap = "8px";
         wrap.style.marginTop = "8px";
-        const items = [
-          { key: "work", label: "上班", cls: "btn btn-green", enabled: true },
-          { key: "off", label: "下班", cls: "btn btn-grey", enabled: false },
-          { key: "out", label: "外出", cls: "btn btn-blue", enabled: true },
-          { key: "arrive", label: "抵達", cls: "btn btn-grey", enabled: false },
-          { key: "leave", label: "離開", cls: "btn btn-grey", enabled: false },
-          { key: "return", label: "返回", cls: "btn btn-grey", enabled: false },
+        const mapKeyToLabel = (k) => {
+          switch (k) {
+            case 'work': return '上班';
+            case 'off': return '下班';
+            case 'out': return '外出';
+            case 'arrive': return '抵達';
+            case 'leave': return '離開';
+            case 'return': return '返回';
+            default: return '上班';
+          }
+        };
+        const userId = appState.currentUserId || auth?.currentUser?.uid || null;
+        const last = userId ? getLastCheckin(userId) : null;
+        const cur = last?.key || null;
+        const base = [
+          { key: "work", label: "上班" },
+          { key: "off", label: "下班" },
+          { key: "out", label: "外出" },
+          { key: "arrive", label: "抵達" },
+          { key: "leave", label: "離開" },
+          { key: "return", label: "返回" },
         ];
+        const decide = (key) => {
+          const EN = { green: 'btn btn-green', red: 'btn btn-red', blue: 'btn btn-blue', teal: 'btn btn-teal' };
+          const DIS = 'btn btn-grey';
+          const enabled = (cls) => ({ enabled: true, cls });
+          const disabled = () => ({ enabled: false, cls: DIS });
+          const by = (k) => {
+            switch (cur) {
+              case 'work':
+                return {
+                  work: disabled(),
+                  off: enabled(EN.red),
+                  out: enabled(EN.blue),
+                  arrive: disabled(),
+                  leave: disabled(),
+                  return: disabled(),
+                }[k];
+              case 'off':
+                return {
+                  work: enabled(EN.green),
+                  off: disabled(),
+                  out: enabled(EN.blue),
+                  arrive: disabled(),
+                  leave: disabled(),
+                  return: disabled(),
+                }[k];
+              case 'out':
+                return {
+                  work: disabled(),
+                  off: disabled(),
+                  out: disabled(),
+                  arrive: enabled(EN.blue),
+                  leave: disabled(),
+                  return: disabled(),
+                }[k];
+              case 'arrive':
+                return {
+                  work: disabled(),
+                  off: disabled(),
+                  out: disabled(),
+                  arrive: disabled(),
+                  leave: enabled(EN.blue),
+                  return: disabled(),
+                }[k];
+              case 'leave':
+                return {
+                  work: disabled(),
+                  off: enabled(EN.red),
+                  out: enabled(EN.blue),
+                  arrive: disabled(),
+                  leave: disabled(),
+                  return: enabled(EN.teal),
+                }[k];
+              case 'return':
+                return {
+                  work: disabled(),
+                  off: enabled(EN.red),
+                  out: enabled(EN.blue),
+                  arrive: disabled(),
+                  leave: disabled(),
+                  return: disabled(),
+                }[k];
+              default:
+                return {
+                  work: enabled(EN.green),
+                  off: disabled(),
+                  out: enabled(EN.blue),
+                  arrive: disabled(),
+                  leave: disabled(),
+                  return: disabled(),
+                }[k];
+            }
+          };
+          return by(key);
+        };
+        const items = base.map((it) => {
+          const st = decide(it.key);
+          return { key: it.key, label: it.label, cls: st.cls, enabled: st.enabled };
+        });
         items.forEach((it) => {
           const b = document.createElement("button");
           b.className = it.cls;
@@ -605,7 +707,7 @@ function openCheckinTypeSelector() {
           attachPressInteractions(b);
           if (!it.enabled) {
             b.disabled = true;
-            b.title = "尚未開放";
+            b.title = "無動作";
           } else {
             b.addEventListener("click", () => { resolve(it.key); closeModal(); });
           }
@@ -2631,25 +2733,25 @@ let firebaseApp, auth, db, functionsApp;
       const cached = getLastCheckin(user.uid);
       if (cached && homeStatusEl) {
         setHomeStatus(cached.key || "work", cached.label || "上班");
-        homeStatusEl.textContent = cached.summary || "";
+        renderHomeStatusText(cached.summary || "");
       }
-      // 其後使用 SDK 查詢覆蓋最新資料
-
       try {
-        const q = fns.query(
+        const q2 = fns.query(
           fns.collection(db, "checkins"),
-          fns.where("uid", "==", user.uid),
-          fns.orderBy("createdAt", "desc"),
-          fns.limit(1)
+          fns.where("uid", "==", user.uid)
         );
-        const snap = await fns.getDocs(q);
-        if (!snap.empty) {
-          const d = snap.docs[0].data();
+        const snap2 = await fns.getDocs(q2);
+        let best = null;
+        snap2.forEach((docSnap) => {
+          const d = docSnap.data();
           const val = d.createdAt;
-          let dt;
-          if (val && typeof val.toDate === 'function') dt = val.toDate();
-          else if (typeof val === 'string') dt = new Date(val);
-          else dt = new Date();
+          let dt = null;
+          if (val && typeof val.toDate === 'function') dt = val.toDate(); else if (typeof val === 'string') dt = new Date(val);
+          if (!dt) return;
+          if (!best || dt > best.dt) best = { data: d, dt };
+        });
+        if (best) {
+          const d = best.data; const dt = best.dt;
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
           const summary = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
           const label = d.status || '';
@@ -2666,50 +2768,12 @@ let firebaseApp, auth, db, functionsApp;
             }
           };
           setHomeStatus(mapLabelToKey(label), label);
-          if (homeStatusEl) homeStatusEl.textContent = summary;
+          if (homeStatusEl) renderHomeStatusText(summary);
           setLastCheckin(user.uid, { summary, key: mapLabelToKey(label), label });
         } else {
           if (homeStatusEl) homeStatusEl.textContent = '';
         }
-      } catch (e) {
-        try {
-          const q2 = fns.query(
-            fns.collection(db, "checkins"),
-            fns.where("uid", "==", user.uid)
-          );
-          const snap2 = await fns.getDocs(q2);
-          let best = null;
-          snap2.forEach((docSnap) => {
-            const d = docSnap.data();
-            const val = d.createdAt;
-            let dt = null;
-            if (val && typeof val.toDate === 'function') dt = val.toDate(); else if (typeof val === 'string') dt = new Date(val);
-            if (!dt) return;
-            if (!best || dt > best.dt) best = { data: d, dt };
-          });
-          if (best) {
-            const d = best.data; const dt = best.dt;
-            const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
-            const summary = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
-            const label = d.status || '';
-            const mapLabelToKey = (s) => {
-              switch (s) {
-                case '上班': return 'work';
-                case '下班': return 'off';
-                case '外出': return 'out';
-                case '抵達': return 'arrive';
-                case '返回': return 'return';
-                case '離開': return 'leave';
-                case '請假': return 'leave-request';
-                default: return 'work';
-              }
-            };
-            setHomeStatus(mapLabelToKey(label), label);
-            if (homeStatusEl) homeStatusEl.textContent = summary;
-            setLastCheckin(user.uid, { summary, key: mapLabelToKey(label), label });
-          }
-        } catch {}
-      }
+      } catch {}
 
       // 從 Firestore 載入 users 清單，帶入帳號列表
       await loadAccountsFromFirestore();
@@ -2825,6 +2889,22 @@ let firebaseApp, auth, db, functionsApp;
           appState.accounts.push(it);
         }
       });
+      try {
+        const uid = appState.currentUserId || null;
+        if (uid) {
+          const acc = appState.accounts.find((a) => a.id === uid) || null;
+          const nm = acc?.name || "";
+          if (nm) {
+            if (homeHeaderNameEl) homeHeaderNameEl.textContent = nm;
+            if (userNameEl) userNameEl.textContent = `歡迎~ ${nm}`;
+          }
+          const photo = acc?.photoUrl || "";
+          if (photo) {
+            if (userPhotoEl) userPhotoEl.src = photo;
+            if (homeHeroPhoto) homeHeroPhoto.src = photo;
+          }
+        }
+      } catch {}
       if (activeMainTab === "settings" && activeSubTab === "帳號") renderSettingsContent("帳號");
     } catch (err) {
       console.warn("載入 Firestore users 失敗：", err);
@@ -2958,6 +3038,7 @@ let firebaseApp, auth, db, functionsApp;
   }
 
   function setActiveTab(tab) {
+    const same = tab === activeMainTab;
     activeMainTab = tab;
     tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
     homeSection.classList.toggle("hidden", tab !== "home");
@@ -2969,14 +3050,16 @@ let firebaseApp, auth, db, functionsApp;
     settingsSection.classList.toggle("hidden", tab !== "settings");
     // 首頁專用版面：切換 home-layout 類別
     appView.classList.toggle("home-layout", tab === "home");
-    // 首頁專用大圖顯示與時鐘切換
-    homeHero?.classList.toggle("hidden", tab !== "home");
-    // 首頁：地圖覆蓋層顯示切換
-    homeMapOverlay?.classList.toggle("hidden", tab !== "home");
+    // 首頁專用大圖已停用，不顯示
+    if (homeHero) homeHero.classList.add("hidden");
+    // 非首頁顯示地圖覆蓋層；首頁隱藏
+    homeMapOverlay?.classList.toggle("hidden", tab === "home");
     // 首頁：A/B/C/D/E 堆疊顯示切換
     homeHeaderStack?.classList.toggle("hidden", tab !== "home");
-    if (tab === "home") { startHomeClock(); startGeoRefresh(); } else { stopHomeClock(); stopGeoRefresh(); }
-    renderSubTabs(tab);
+    if (tab === "home") { startHomeClock(); } else { stopHomeClock(); }
+    // 所有分頁皆更新定位地圖，僅在頁面可見時執行
+    startGeoRefresh();
+    if (!same) renderSubTabs(tab);
   }
 
   function renderSubTabs(mainTab) {
@@ -3540,6 +3623,32 @@ let firebaseApp, auth, db, functionsApp;
   setActiveTab(activeMainTab);
 
   // 內部功能：定位與打卡
+  function renderHomeStatusText(str) {
+    const el = homeStatusEl;
+    if (!el) return;
+    const s = String(str || "").trim();
+    const parts = s.split(/\s+/);
+    if (parts.length >= 2) {
+      const flag = parts.pop();
+      const status = parts.pop();
+      const before = parts.join(" ");
+      const flagCls = flag === "異常" ? "bad" : "";
+      const statusCls = (() => {
+        switch (status) {
+          case "上班": return "work";
+          case "下班": return "off";
+          case "外出": return "out";
+          case "抵達": return "arrive";
+          case "離開": return "leave";
+          case "返回": return "return";
+          default: return "";
+        }
+      })();
+      el.innerHTML = `${before} <span class="status-label ${statusCls}">${status}</span> <span class="status-flag ${flagCls}">${flag}</span>`;
+    } else {
+      el.textContent = s;
+    }
+  }
   function initGeolocation() {
     if (!("geolocation" in navigator)) {
       if (locationInfo) locationInfo.textContent = "此裝置不支援定位";
@@ -3650,9 +3759,11 @@ function setHomeStatus(key, label) {
   ];
   document.body.classList.remove(...classes);
   document.body.classList.add(`status-${key}`);
-  if (homeStatusEl) homeStatusEl.textContent = label || "";
-  // 顯示大照片以便邊框與動畫呈現（若目前隱藏）
-  if (homeHero) homeHero.classList.remove("hidden");
+  if (homeStatusEl) {
+    const t = label || "";
+    const cls = t === "上班" ? "work" : "";
+    homeStatusEl.innerHTML = `<span class="status-label ${cls}">${t}</span>`;
+  }
 }
 
 btnStart?.addEventListener("click", async () => {
@@ -3917,10 +4028,9 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
         fRow.textContent = '';
         fRow.classList.add('hidden');
       }
-      // 最終切換狀態顯示與動畫
       setHomeStatus(statusKey, statusLabel);
       const summary = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
-      if (homeStatusEl) homeStatusEl.textContent = summary;
+      if (homeStatusEl) renderHomeStatusText(summary);
       try { const u = auth?.currentUser; if (u?.uid) setLastCheckin(u.uid, { summary, key: statusKey, label: statusLabel }); } catch {}
     } catch (err) {
       alert(`打卡資料寫入失敗：${err?.message || err}`);
@@ -3935,11 +4045,18 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
  btnStart?.addEventListener("click", async () => {
   const type = await openCheckinTypeSelector();
   if (!type) return;
-  if (type === "work") {
-    await startCheckinFlow("work", "上班");
-  } else if (type === "out") {
-    await startCheckinFlow("out", "外出");
-  }
+  const mapKeyToLabel = (k) => {
+    switch (k) {
+      case 'work': return '上班';
+      case 'off': return '下班';
+      case 'out': return '外出';
+      case 'arrive': return '抵達';
+      case 'leave': return '離開';
+      case 'return': return '返回';
+      default: return '上班';
+    }
+  };
+  await startCheckinFlow(type, mapKeyToLabel(type));
 });
   // 打卡分頁內容渲染（子分頁）
   function renderCheckinContent(label) {
@@ -3953,18 +4070,9 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
           const user = auth?.currentUser || null;
           if (!user) { container.textContent = "請先登入"; return; }
           const ref = fns.collection(db, "checkins");
-          let snap;
-          try {
-            const q = fns.query(ref, fns.where("uid", "==", user.uid), fns.orderBy("createdAt", "desc"), fns.limit(50));
-            snap = await fns.getDocs(q);
-          } catch (err) {
-            // 後備查詢：僅使用 where 篩選，並於前端排序
-            const q2 = fns.query(ref, fns.where("uid", "==", user.uid));
-            snap = await fns.getDocs(q2);
-          }
+          const q2 = fns.query(ref, fns.where("uid", "==", user.uid));
+          const snap = await fns.getDocs(q2);
           const tzNow = nowInTZ('Asia/Taipei');
-          const d0 = new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate());
-          const d1 = new Date(d0); d1.setDate(d0.getDate() + 1);
           const list = [];
           snap.forEach((doc) => {
             const data = doc.data();
@@ -3974,51 +4082,182 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             if (!dt) return;
             list.push({ id: doc.id, ...data, dt });
           });
-          // 今日篩選並依時間倒序
-          const todayList = list.filter((r) => r.dt >= d0 && r.dt < d1).sort((a, b) => b.dt - a.dt).slice(0, 50);
-          if (!todayList.length) { container.textContent = "今日無打卡紀錄"; return; }
-          todayList.forEach((r) => {
-            const card = document.createElement("div");
-            card.style.display = "grid";
-            card.style.gridTemplateColumns = "1fr";
-            card.style.gap = "8px";
-            card.style.margin = "8px 0";
-            const status = document.createElement("div");
-            status.textContent = `狀態：${r.status || ''}`;
-            const dtStr = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
-            const when = document.createElement("div");
-            when.textContent = `時間：${dtStr}`;
-            const dev = document.createElement("div");
-            dev.textContent = `裝置ID：${r.deviceId || '未知'}`;
-            card.appendChild(status);
-            card.appendChild(when);
-            const mapImg = document.createElement("img");
-            mapImg.style.width = "100%";
-            mapImg.style.borderRadius = "8px";
-            if (typeof r.lat === 'number' && typeof r.lng === 'number') {
-              const lat = Number(r.lat).toFixed(6);
-              const lon = Number(r.lng).toFixed(6);
-              const size = "640x320";
-              const zoom = 16;
-              const marker = `markers=color:red|${lat},${lon}`;
-              mapImg.src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=${zoom}&size=${size}&maptype=roadmap&${marker}&key=${GOOGLE_MAPS_API_KEY}`;
-              card.appendChild(mapImg);
-            } else {
-              const no = document.createElement("div");
-              no.textContent = "定位地圖：座標未知";
-              card.appendChild(no);
-            }
-            if (r.photoData) {
-              const photo = document.createElement("img");
-              photo.src = r.photoData;
-              photo.alt = "打卡照片";
-              photo.style.width = "100%";
-              photo.style.borderRadius = "8px";
-              card.appendChild(photo);
-            }
-            card.appendChild(dev);
-            container.appendChild(card);
-          });
+          const todayYmd = `${tzNow.getFullYear()}-${String(tzNow.getMonth()+1).padStart(2,'0')}-${String(tzNow.getDate()).padStart(2,'0')}`;
+          container.innerHTML = `
+            <div class="roster-datebar">
+              <label for="recordDate">日期：</label>
+              <input id="recordDate" type="date" />
+            </div>
+            <div id="recordList"></div>
+          `;
+          const dateInput = container.querySelector('#recordDate');
+          const listRoot = container.querySelector('#recordList');
+          if (!listRoot || !dateInput) return;
+          dateInput.value = todayYmd;
+          function renderForDate(ymdStr) {
+            const parts = String(ymdStr || '').split('-');
+            if (parts.length !== 3) return;
+            const y = Number(parts[0]);
+            const m = Number(parts[1]) - 1;
+            const d = Number(parts[2]);
+            const d0 = new Date(y, m, d);
+            const d1 = new Date(d0); d1.setDate(d0.getDate() + 1);
+            const dayList = list.filter((r) => r.dt >= d0 && r.dt < d1).sort((a, b) => b.dt - a.dt).slice(0, 50);
+            listRoot.innerHTML = '';
+            if (!dayList.length) { listRoot.textContent = '該日無打卡紀錄'; return; }
+            dayList.forEach((r) => {
+              const card = document.createElement('div');
+              card.className = 'record-card';
+              card.style.display = 'grid';
+              card.style.gridTemplateColumns = '1fr';
+              card.style.gap = '8px';
+              const status = document.createElement('div');
+              const st = r.status || '';
+              const stCls = (() => {
+                switch (st) {
+                  case '上班': return 'work';
+                  case '下班': return 'off';
+                  case '外出': return 'out';
+                  case '抵達': return 'arrive';
+                  case '離開': return 'leave';
+                  case '返回': return 'return';
+                  default: return '';
+                }
+              })();
+              const place = r.locationName || '未知地點';
+              status.innerHTML = `打卡地點：${place} 狀態：<span class="status-label ${stCls}">${st}</span>`;
+              const dtStr = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
+              const when = document.createElement('div');
+              when.textContent = `時間：${dtStr}`;
+              const dev = document.createElement('div');
+              dev.textContent = `裝置名稱：${getDeviceNameById(r.deviceId)}`;
+              card.appendChild(status);
+              card.appendChild(when);
+              const mapBtn = document.createElement('button');
+              mapBtn.className = 'btn btn-blue';
+              mapBtn.type = 'button';
+              mapBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;"><path d="M3 6l7-3 7 3 4-2v14l-4 2-7-3-7 3V6z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>地圖`;
+              mapBtn.style.borderRadius = '0';
+              attachPressInteractions(mapBtn);
+              mapBtn.disabled = !(typeof r.lat === 'number' && typeof r.lng === 'number');
+              mapBtn.title = mapBtn.disabled ? '座標未知' : '';
+              mapBtn.addEventListener('click', () => {
+                if (mapBtn.disabled) return;
+                const lat = Number(r.lat).toFixed(6);
+                const lon = Number(r.lng).toFixed(6);
+                const size = '640x360';
+                const zoom = 16;
+                const marker = `markers=color:red|${lat},${lon}`;
+                const src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=${zoom}&size=${size}&maptype=roadmap&${marker}&key=${GOOGLE_MAPS_API_KEY}`;
+                openModal({
+                  title: '定位地圖',
+                  fields: [],
+                  submitText: '關閉',
+                  refreshOnSubmit: false,
+                  onSubmit: async () => true,
+                  afterRender: ({ body }) => {
+                    const img = document.createElement('img');
+                    img.src = src; img.alt = '定位地圖'; img.style.width = '100%'; img.style.borderRadius = '8px';
+                    const txt = document.createElement('div'); txt.textContent = `座標：${lat}, ${lon}`; txt.className = 'muted'; txt.style.marginTop = '8px';
+                    body.appendChild(img); body.appendChild(txt);
+                  }
+                });
+              });
+
+              const photoBtn = document.createElement('button');
+              photoBtn.className = 'btn btn-orange';
+              photoBtn.type = 'button';
+              photoBtn.innerHTML = `<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"margin-right:6px;\"><rect x=\"4\" y=\"7\" width=\"16\" height=\"12\" rx=\"2\" stroke=\"currentColor\" stroke-width=\"2\" /><path d=\"M9 7l1.5-2h3L15 7\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" /><circle cx=\"12\" cy=\"13\" r=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\" /></svg>照片`;
+              photoBtn.style.borderRadius = '0';
+              attachPressInteractions(photoBtn);
+              photoBtn.disabled = !r.photoData;
+              photoBtn.title = photoBtn.disabled ? '無照片' : '';
+              photoBtn.addEventListener('click', () => {
+                if (photoBtn.disabled) return;
+                openModal({
+                  title: '打卡照片',
+                  fields: [],
+                  submitText: '關閉',
+                  refreshOnSubmit: false,
+                  onSubmit: async () => true,
+                  afterRender: ({ body }) => {
+                    const img = document.createElement('img');
+                    img.src = r.photoData; img.alt = '打卡照片'; img.style.width = '100%'; img.style.borderRadius = '8px';
+                    body.appendChild(img);
+                  }
+                });
+              });
+
+              const modifyBtn = document.createElement('button');
+              modifyBtn.className = 'btn btn-purple';
+              modifyBtn.type = 'button';
+              modifyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 4l6 6-9 9H5v-6l9-9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>申請修改`;
+              modifyBtn.style.borderRadius = '0';
+              attachPressInteractions(modifyBtn);
+              modifyBtn.addEventListener('click', () => {
+                const dtStr2 = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
+                const statusOptions = [
+                  { value: '上班', label: '上班' },
+                  { value: '下班', label: '下班' },
+                  { value: '外出', label: '外出' },
+                  { value: '抵達', label: '抵達' },
+                  { value: '離開', label: '離開' },
+                  { value: '返回', label: '返回' },
+                ];
+                openModal({
+                  title: '申請修改打卡紀錄',
+                  fields: [
+                    { key: 'place', label: '打卡位置', type: 'text' },
+                    { key: 'status', label: '狀態', type: 'select', options: statusOptions },
+                    { key: 'datetime', label: '日期時間', type: 'text', placeholder: 'YYYY-MM-DD HH:mm:ss' },
+                  ],
+                  initial: { place: r.locationName || '', status: r.status || '上班', datetime: dtStr2 },
+                  submitText: '送出申請',
+                  refreshOnSubmit: false,
+                  onSubmit: async (data) => {
+                    try {
+                      await ensureFirebase();
+                      const user2 = auth?.currentUser || null;
+                      const payload = {
+                        uid: user2?.uid || null,
+                        checkinId: r.id,
+                        original: {
+                          place: r.locationName || '',
+                          status: r.status || '',
+                          datetime: dtStr2,
+                        },
+                        requested: {
+                          place: String(data.place || ''),
+                          status: String(data.status || ''),
+                          datetime: String(data.datetime || ''),
+                        },
+                        createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+                      };
+                      if (db && fns.addDoc && fns.collection) {
+                        await fns.addDoc(fns.collection(db, 'changeRequests'), payload);
+                      }
+                      alert('已送出修改申請');
+                      return true;
+                    } catch (e) {
+                      alert(`申請失敗：${e?.message || e}`);
+                      return false;
+                    }
+                  },
+                });
+              });
+
+              const actions = document.createElement('div');
+              actions.className = 'record-actions';
+              actions.appendChild(mapBtn);
+              actions.appendChild(photoBtn);
+              actions.appendChild(modifyBtn);
+              card.appendChild(actions);
+              card.appendChild(dev);
+              listRoot.appendChild(card);
+            });
+          }
+          renderForDate(todayYmd);
+          dateInput.addEventListener('change', () => renderForDate(dateInput.value));
         } catch (e) {
           const msg = e?.message || e;
           container.textContent = typeof msg === 'string' ? `載入失敗：${msg}` : "載入失敗：可能為權限或索引設定問題";
