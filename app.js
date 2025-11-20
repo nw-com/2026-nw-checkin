@@ -279,7 +279,24 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
   hTitle.className = "modal-title";
   hTitle.textContent = title;
   header.appendChild(hTitle);
-  // 移除標題列的「關閉」按鈕，改由底部「取消」控制關閉
+  const btnClose = document.createElement("button");
+  btnClose.className = "btn modal-close";
+  btnClose.setAttribute("aria-label", "關閉");
+  btnClose.textContent = "×";
+  btnClose.style.borderRadius = "0";
+  btnClose.style.width = "36px";
+  btnClose.style.height = "36px";
+  btnClose.style.display = "flex";
+  btnClose.style.alignItems = "center";
+  btnClose.style.justifyContent = "center";
+  btnClose.style.padding = "0";
+  btnClose.style.background = "transparent";
+  btnClose.style.border = "none";
+  btnClose.style.color = "#000";
+  btnClose.style.fontSize = "20px";
+  attachPressInteractions(btnClose);
+  btnClose.addEventListener("click", () => closeModal());
+  header.appendChild(btnClose);
 
   const body = document.createElement("div");
   body.className = "modal-body";
@@ -388,19 +405,6 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
   footer.style.display = "grid";
   footer.style.gridTemplateColumns = "1fr";
   footer.style.gap = "8px";
-  const btnCancel = document.createElement("button");
-  btnCancel.className = "btn";
-  btnCancel.textContent = "取消";
-  btnCancel.style.borderRadius = "0";
-  btnCancel.style.height = "6vh";
-  btnCancel.style.fontSize = "3vh";
-  btnCancel.style.display = "flex";
-  btnCancel.style.alignItems = "center";
-  btnCancel.style.justifyContent = "center";
-  btnCancel.style.padding = "0";
-  btnCancel.style.width = "100%";
-  attachPressInteractions(btnCancel);
-  btnCancel.addEventListener("click", () => closeModal());
   const btnSubmit = document.createElement("button");
   btnSubmit.className = "btn btn-primary";
   btnSubmit.textContent = submitText;
@@ -443,7 +447,6 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
       }
     }
   });
-  footer.appendChild(btnCancel);
   footer.appendChild(btnSubmit);
 
   modal.appendChild(header);
@@ -486,7 +489,7 @@ function openCheckinTypeSelector() {
       submitText: "取消",
       refreshOnSubmit: false,
       onSubmit: () => false,
-      afterRender: ({ body }) => {
+      afterRender: ({ body, header, footer }) => {
         const footerEl = modalRoot?.querySelector('.modal-footer');
         if (footerEl) footerEl.remove();
         const wrap = document.createElement("div");
@@ -523,25 +526,10 @@ function openCheckinTypeSelector() {
           wrap.appendChild(b);
         });
         body.appendChild(wrap);
-        const cancel = document.createElement("button");
-        cancel.className = "btn";
-        cancel.textContent = "取消";
-        cancel.style.height = "6vh";
-        cancel.style.fontSize = "3vh";
-        cancel.style.borderRadius = "0";
-        cancel.style.display = "flex";
-        cancel.style.alignItems = "center";
-        cancel.style.justifyContent = "center";
-        cancel.style.padding = "0";
-        cancel.style.marginTop = "8px";
-        cancel.style.width = "100%";
-        attachPressInteractions(cancel);
-        cancel.addEventListener("click", () => { resolve(null); closeModal(); });
-        body.appendChild(cancel);
+        const x = header?.querySelector?.('.modal-close');
+        x?.addEventListener('click', () => { resolve(null); });
       },
     });
-    const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
-    cancelBtn?.addEventListener('click', () => resolve(null));
   });
 }
 
@@ -786,8 +774,16 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
 
         // 重新定位按鈕（不可編輯座標/地址/半徑）
         const btnRelocate = document.createElement("button");
-        btnRelocate.className = "btn";
+        btnRelocate.className = "btn btn-green";
         btnRelocate.textContent = "重新定位";
+        btnRelocate.style.borderRadius = "0";
+        btnRelocate.style.height = "6vh";
+        btnRelocate.style.fontSize = "3vh";
+        btnRelocate.style.display = "flex";
+        btnRelocate.style.alignItems = "center";
+        btnRelocate.style.justifyContent = "center";
+        btnRelocate.style.padding = "0";
+        btnRelocate.style.width = "100%";
         attachPressInteractions(btnRelocate);
         footer.insertBefore(btnRelocate, footer.querySelector(".btn.btn-primary"));
         btnRelocate.addEventListener("click", () => {
@@ -804,6 +800,8 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
     });
     const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
     cancelBtn?.addEventListener('click', () => resolve(null));
+    const xBtn = modalRoot?.querySelector('.modal-header .modal-close');
+    xBtn?.addEventListener('click', () => resolve(null));
   });
 }
 
@@ -2570,7 +2568,7 @@ let firebaseApp, auth, db, functionsApp;
           const d = found.data;
           const dt = found.dt;
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
-          gRow.textContent = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
+          const summary = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
           const label = d.status || '';
           const mapLabelToKey = (s) => {
             switch (s) {
@@ -2585,6 +2583,7 @@ let firebaseApp, auth, db, functionsApp;
             }
           };
           setHomeStatus(mapLabelToKey(label), label);
+          if (homeStatusEl) homeStatusEl.textContent = summary;
         } else if (gRow) {
           gRow.textContent = '';
         }
@@ -2827,15 +2826,14 @@ let firebaseApp, auth, db, functionsApp;
   function applyPagePermissionsForUser(user) {
     try {
       const account = appState.accounts.find((a) => a.email && user.email && a.email.toLowerCase() === user.email.toLowerCase());
-      const allowed = new Set(["home"]);
+      const allowed = new Set(["home", "checkin"]);
       if (account && Array.isArray(account.pagePermissions) && account.pagePermissions.length) {
         account.pagePermissions.forEach((k) => allowed.add(k));
         tabButtons.forEach((b) => {
           const k = b.dataset.tab;
           if (!allowed.has(k)) b.classList.add("hidden"); else b.classList.remove("hidden");
         });
-        // 若目前選中的分頁不在允許清單，切回首頁
-        if (activeMainTab && !allowed.has(activeMainTab)) setActiveTab("home");
+        // 僅控制可視分頁，不強制切換目前分頁
       } else {
         // 未設定權限時顯示所有分頁
         tabButtons.forEach((b) => b.classList.remove("hidden"));
@@ -3549,16 +3547,14 @@ function setHomeStatus(key, label) {
   if (homeHero) homeHero.classList.remove("hidden");
 }
 
-btnStart?.addEventListener("click", () => setHomeStatus("work", "上班"));
-btnEnd?.addEventListener("click", () => setHomeStatus("off", "下班"));
-btnOut?.addEventListener("click", () => setHomeStatus("out", "外出"));
-btnArrive?.addEventListener("click", () => setHomeStatus("arrive", "抵達"));
-btnReturn?.addEventListener("click", () => setHomeStatus("return", "返回"));
-btnLeave?.addEventListener("click", () => setHomeStatus("leave", "離開"));
-btnLeaveRequest?.addEventListener("click", () => setHomeStatus("leave-request", "請假"));
-// 補卡不改變狀態顏色，僅顯示文字（可依需求調整）
-btnMakeup?.addEventListener("click", () => {
-  if (homeStatusEl) homeStatusEl.textContent = "補卡";
+btnStart?.addEventListener("click", async () => {
+  const type = await openCheckinTypeSelector();
+  if (!type) return;
+  if (type === "work") {
+    await startCheckinFlow("work", "上班");
+  } else if (type === "out") {
+    await startCheckinFlow("out", "外出");
+  }
 });
 
 // ===== 上班打卡完整流程（位置 → 地圖 → 自拍 → 儲存） =====
@@ -3690,17 +3686,18 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
           video.style.aspectRatio = '4 / 6';
           video.style.objectFit = 'cover';
           video.style.background = '#000';
-          video.style.borderRadius = '8px';
+          video.style.borderRadius = '0';
           const controls = document.createElement('div');
           controls.style.display = 'flex';
           controls.style.justifyContent = 'center';
           controls.style.marginTop = '12px';
-          const btnSnap = document.createElement('button'); btnSnap.className = 'btn btn-primary'; btnSnap.setAttribute('aria-label','拍照'); attachPressInteractions(btnSnap);
+          const btnSnap = document.createElement('button'); btnSnap.className = 'btn btn-green'; btnSnap.setAttribute('aria-label','拍照'); attachPressInteractions(btnSnap);
           btnSnap.style.width = '70%';
           btnSnap.style.display = 'flex';
           btnSnap.style.alignItems = 'center';
           btnSnap.style.justifyContent = 'center';
           btnSnap.style.gap = '8px';
+          btnSnap.style.borderRadius = '0';
           btnSnap.style.fontSize = '0'; // 不顯示文字
           // 相機圖示 SVG（白色），跟隨文字顏色
           btnSnap.innerHTML = `
@@ -3773,6 +3770,8 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       // 取消時回傳 null
       const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
       cancelBtn?.addEventListener('click', () => resolve(null));
+      const xBtn = modalRoot?.querySelector('.modal-header .modal-close');
+      xBtn?.addEventListener('click', () => resolve(null));
     });
     if (!photoDataUrl) return; // 使用者取消
 
@@ -3806,7 +3805,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       const now = new Date();
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
       if (gRow) {
-        gRow.textContent = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
+        gRow.textContent = '';
       }
       if (fRow) {
         fRow.textContent = '';
@@ -3814,6 +3813,8 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       }
       // 最終切換狀態顯示與動畫
       setHomeStatus(statusKey, statusLabel);
+      const summary = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
+      if (homeStatusEl) homeStatusEl.textContent = summary;
     } catch (err) {
       alert(`打卡資料寫入失敗：${err?.message || err}`);
     }
