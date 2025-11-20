@@ -84,10 +84,14 @@ try {
       if (a && a.message) return String(a.message);
       return '';
     }).join(' ');
-    if (text.includes('Firestore/Listen/channel') || text.includes('documents:runQuery') || text.includes('@firebase/firestore') || text.includes('RPC_ERROR')) return;
+    if (text.includes('Firestore/Listen/channel') || text.includes('documents:runQuery') || text.includes('documents:batchGet') || text.includes('@firebase/firestore') || text.includes('RPC_ERROR') || text.includes('ERR_ABORTED')) return;
     return origErr.apply(console, args);
   };
 } catch {}
+
+let isLoadingCheckins = false;
+let firebaseInitialized = false;
+let authListenerAttached = false;
 
 function updateHomeMap() {
   if (!homeMapImg || !lastCoords) return;
@@ -183,7 +187,7 @@ function renderHomeStatusText(str) {
     const flag = parts.pop();
     const status = parts.pop();
     const before = parts.join(" ");
-    const flagCls = flag === "異常" ? "bad" : "";
+    const flagCls = flag === "異常" ? "bad" : (flag === "正常" ? "good" : "");
     const statusCls = (() => {
       switch (status) {
         case "上班": return "work";
@@ -447,16 +451,13 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
   footer.style.gridTemplateColumns = "1fr";
   footer.style.gap = "8px";
   const btnSubmit = document.createElement("button");
-  btnSubmit.className = "btn btn-primary";
+  btnSubmit.className = "btn btn-darkgrey";
   btnSubmit.textContent = submitText;
-  btnSubmit.style.borderRadius = "0";
-  btnSubmit.style.height = "6vh";
-  btnSubmit.style.fontSize = "3vh";
-  btnSubmit.style.display = "flex";
-  btnSubmit.style.alignItems = "center";
-  btnSubmit.style.justifyContent = "center";
-  btnSubmit.style.padding = "0";
-  btnSubmit.style.width = "100%";
+  btnSubmit.style.display = "";
+  btnSubmit.style.alignItems = "";
+  btnSubmit.style.justifyContent = "";
+  btnSubmit.style.padding = "";
+  btnSubmit.style.width = "";
   attachPressInteractions(btnSubmit);
   btnSubmit.addEventListener("click", async () => {
     const data = {};
@@ -529,6 +530,65 @@ function getDeviceNameById(id) {
   } catch {
     return "未知裝置";
   }
+}
+
+function getLocalDeviceModel() {
+  try {
+    const ua = navigator.userAgent || "";
+    const plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+    let model = "";
+    if (/Android/i.test(ua)) {
+      const m = ua.match(/Android\s+[\d.]+;\s*([^)]+)\)/i);
+      model = m ? m[1].trim() : "Android 裝置";
+    } else if (/iPhone|iPad|iPod/i.test(ua)) {
+      if (/iPhone/i.test(ua)) model = "iPhone"; else if (/iPad/i.test(ua)) model = "iPad"; else model = "iOS 裝置";
+    } else if (/Windows/i.test(ua)) {
+      model = "Windows PC";
+    } else if (/Macintosh/i.test(ua)) {
+      model = "Mac";
+    } else {
+      model = plat || "未知裝置";
+    }
+    return model;
+  } catch { return "未知裝置"; }
+}
+
+function getDeviceModelById(id) {
+  try {
+    const my = getDeviceId();
+    if (id && my && id === my) return getLocalDeviceModel();
+    return "未知裝置";
+  } catch { return "未知裝置"; }
+}
+
+function setDeviceModelCache(id, model) {
+  try {
+    if (!id || !model) return;
+    localStorage.setItem(`deviceModel:${id}`, String(model));
+  } catch {}
+}
+function getDeviceModelCache(id) {
+  try {
+    if (!id) return "";
+    return localStorage.getItem(`deviceModel:${id}`) || "";
+  } catch { return ""; }
+}
+
+async function initDeviceProfile() {
+  try {
+    await ensureFirebase();
+    if (!db || !fns.setDoc || !fns.doc) return;
+    const id = getDeviceId();
+    if (!id) return;
+    const payload = {
+      model: getLocalDeviceModel(),
+      ua: navigator.userAgent || "",
+      platform: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "",
+      updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+    };
+    await fns.setDoc(fns.doc(db, "devices", id), payload, { merge: true });
+    setDeviceModelCache(id, payload.model);
+  } catch {}
 }
 
 function setLastCheckin(uid, payload) {
@@ -724,13 +784,13 @@ function openCheckinTypeSelector() {
           const b = document.createElement("button");
           b.className = it.cls;
           b.textContent = it.label;
-          b.style.height = "6vh";
-          b.style.fontSize = "3vh";
-          b.style.borderRadius = "0";
-          b.style.display = "flex";
-          b.style.alignItems = "center";
-          b.style.justifyContent = "center";
-          b.style.padding = "0";
+          b.style.height = "";
+          b.style.fontSize = "";
+          b.style.borderRadius = "";
+          b.style.display = "";
+          b.style.alignItems = "";
+          b.style.justifyContent = "";
+          b.style.padding = "";
           attachPressInteractions(b);
           if (!it.enabled) {
             b.disabled = true;
@@ -992,8 +1052,8 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         btnRelocate.className = "btn btn-green";
         btnRelocate.textContent = "重新定位";
         btnRelocate.style.borderRadius = "0";
-        btnRelocate.style.height = "6vh";
-        btnRelocate.style.fontSize = "3vh";
+        btnRelocate.style.height = "";
+        btnRelocate.style.fontSize = "";
         btnRelocate.style.display = "flex";
         btnRelocate.style.alignItems = "center";
         btnRelocate.style.justifyContent = "center";
@@ -1313,26 +1373,18 @@ function showProfileModal(user, role) {
     },
     afterRender: async ({ header, body, footer, inputs }) => {
       try {
-        // 置中布局
-        body.style.textAlign = "center";
+        // 表單行改為預設對齊，移除水平置中；隱藏所有標籤
+        body.style.textAlign = "";
         Array.from(body.querySelectorAll(".form-row")).forEach((row) => {
-          row.style.display = "flex";
-          row.style.flexDirection = "column";
-          row.style.alignItems = "center";
+          row.style.display = "";
+          row.style.flexDirection = "";
+          row.style.alignItems = "";
+          const lab = row.querySelector('.label'); if (lab) lab.style.display = 'none';
         });
 
-        // 初始狀態：唯讀，停用儲存
+        // 儲存按鈕啟用（允許更換照片後直接儲存）
         const btnSubmit = footer.querySelector(".btn-primary");
-        if (btnSubmit) btnSubmit.disabled = true;
-
-        // 加入「編輯」按鈕（位於標題右側）
-        const btnEdit = document.createElement("button");
-        btnEdit.className = "btn";
-        btnEdit.textContent = "編輯";
-        attachPressInteractions(btnEdit);
-        header.appendChild(btnEdit); // 標題右側加入「編輯」按鈕
-
-        let editing = false;
+        if (btnSubmit) btnSubmit.disabled = false;
 
         // 以 Firestore 使用者文件覆蓋照片與基本資訊
         if (db && fns.doc && fns.getDoc && user?.uid) {
@@ -1360,9 +1412,10 @@ function showProfileModal(user, role) {
                 if (photo) preview.src = photo;
                 if (input) {
                   input.style.display = "none";
-                  preview.addEventListener("click", () => {
-                    if (editing) input.click();
-                  });
+                  input.disabled = false;
+                  preview.style.cursor = 'pointer';
+                  preview.addEventListener("click", () => { input.click(); });
+                  input.addEventListener('change', () => { try { const f = input.files?.[0]; if (f) { const url = URL.createObjectURL(f); preview.src = url; if (btnSubmit) btnSubmit.disabled = false; } } catch {} });
                 }
               }
             }
@@ -1411,30 +1464,51 @@ function showProfileModal(user, role) {
           }
         }
 
-        // 切換編輯狀態：啟用/停用可編輯欄位與儲存按鈕
-        const editableKeys = new Set(["photoUrl", "name", "email", "phone", "role"]);
-        const toggleEditing = (to) => {
-          editing = to;
-          inputs.forEach((el) => {
-            const k = el.dataset.key;
-            if (!editableKeys.has(k)) return; // 非可編輯欄位維持唯讀
-            if (k === "role" && appState.currentUserRole !== "系統管理員") {
-              // 非系統管理員：角色仍維持唯讀
-              el.disabled = true;
-              return;
-            }
-            el.disabled = !editing;
-          });
-          // 影像預覽游標提示
-          const preview = body.querySelector('[data-key="photoUrl"]')?.parentElement?.querySelector('img');
-          if (preview) preview.style.cursor = editing ? "pointer" : "default";
-          if (btnSubmit) btnSubmit.disabled = !editing;
-          btnEdit.textContent = editing ? "完成編輯" : "編輯";
-        };
-
-        // 初始為唯讀
-        toggleEditing(false);
-        btnEdit.addEventListener("click", () => toggleEditing(!editing));
+        // 保持所有欄位不可編輯（唯獨照片可更換），並套用輸入外觀
+        inputs.forEach((el) => {
+          const k = el.dataset.key;
+          if (k === 'photoUrl') { el.disabled = false; return; }
+          el.disabled = true;
+          el.style.textAlign = 'center';
+          el.style.border = 'none';
+        });
+        // 顯示抬頭並水平置中整個視窗
+        body.style.textAlign = 'center';
+        Array.from(body.querySelectorAll('.form-row')).forEach((row) => {
+          const lab = row.querySelector('.label'); if (lab) lab.style.display = '';
+          row.style.display = 'flex';
+          row.style.flexDirection = 'column';
+          row.style.alignItems = 'center';
+        });
+        // 刪除電子郵件與手機號碼顯示
+        const emailInput = body.querySelector('[data-key="email"]');
+        if (emailInput?.parentElement) emailInput.parentElement.remove();
+        const phoneInput = body.querySelector('[data-key="phone"]');
+        if (phoneInput?.parentElement) phoneInput.parentElement.remove();
+        // 角色選擇改為純文字顯示、移除下拉箭頭
+        const roleInput = body.querySelector('[data-key="role"]');
+        if (roleInput) {
+          roleInput.disabled = false;
+          roleInput.style.webkitAppearance = 'none';
+          roleInput.style.mozAppearance = 'none';
+          roleInput.style.appearance = 'none';
+          roleInput.style.background = 'transparent';
+          roleInput.style.pointerEvents = 'none';
+          roleInput.style.textAlign = 'center';
+          roleInput.style.border = 'none';
+        }
+        // 「儲存」按鈕字體與「登出」一致
+        const btnSubmit2 = footer.querySelector('.btn-primary') || footer.querySelector('.btn');
+        if (btnSubmit2) {
+          btnSubmit2.className = 'btn';
+          btnSubmit2.style.height = '';
+          btnSubmit2.style.fontSize = '';
+          btnSubmit2.style.display = '';
+          btnSubmit2.style.alignItems = '';
+          btnSubmit2.style.justifyContent = '';
+          btnSubmit2.style.padding = '';
+          btnSubmit2.style.width = '';
+        }
       } catch {}
 
       // 在視窗最下方（footer）加入登出按鈕
@@ -2217,6 +2291,7 @@ function renderSettingsAccounts() {
           { value: "manage", label: "管理" },
           { value: "feature", label: "功能" },
           { value: "settings", label: "設定" },
+          { value: "personnel", label: "人事" },
         ] },
         { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
       ],
@@ -2326,6 +2401,7 @@ function renderSettingsAccounts() {
               { value: "manage", label: "管理" },
               { value: "feature", label: "功能" },
               { value: "settings", label: "設定" },
+              { value: "personnel", label: "人事" },
             ] },
             { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
           ],
@@ -2660,6 +2736,7 @@ let firebaseApp, auth, db, functionsApp;
 
   async function ensureFirebase() {
   if (!isConfigReady()) return;
+  if (firebaseInitialized && auth && db) { return; }
   const [
     { initializeApp },
     { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
@@ -2755,7 +2832,10 @@ let firebaseApp, auth, db, functionsApp;
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
-      applyPagePermissionsForUser(user);
+        applyPagePermissionsForUser(user);
+
+        // 紀錄目前裝置型號至 Firestore（供其他裝置顯示）
+        initDeviceProfile();
 
       const cached = getLastCheckin(user.uid);
       if (cached && homeStatusEl) {
@@ -2819,8 +2899,8 @@ let firebaseApp, auth, db, functionsApp;
       if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
 
       // 啟用定位顯示
-        initGeolocation();
-        startGeoRefresh();
+      initGeolocation();
+      startGeoRefresh();
 
         // 綁定打卡
         checkinBtn?.addEventListener("click", () => doCheckin(user, role));
@@ -2836,6 +2916,8 @@ let firebaseApp, auth, db, functionsApp;
         stopGeoRefresh();
       }
     });
+    authListenerAttached = true;
+    firebaseInitialized = true;
   } catch (err) {
     // 提示使用者可能需要在 Firebase Authentication 設定中加入授權網域（localhost/127.0.0.1）
     console.warn("Firebase Auth 狀態監聽失敗：", err);
@@ -3981,26 +4063,40 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
               try { video.pause?.(); } catch {}
               stream = null;
               video.style.display = 'none';
-            } catch (e) {
-              alert(`拍照失敗：${e?.message || e}`);
-            }
-          });
-        },
+        } catch (e) {
+          alert(`拍照失敗：${e?.message || e}`);
+        }
       });
-      // 取消時回傳 null
-      const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
-      cancelBtn?.addEventListener('click', () => resolve(null));
-      const xBtn = modalRoot?.querySelector('.modal-header .modal-close');
-      xBtn?.addEventListener('click', () => resolve(null));
-    });
-    if (!photoDataUrl) return; // 使用者取消
+    },
+  });
+  // 取消時回傳 null
+  const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
+  cancelBtn?.addEventListener('click', () => resolve(null));
+  const xBtn = modalRoot?.querySelector('.modal-header .modal-close');
+  xBtn?.addEventListener('click', () => resolve(null));
+});
+if (!photoDataUrl) return; // 使用者取消
 
-    // 4) 寫入 Firestore 並更新首頁 F 列摘要
-    try {
-      await ensureFirebase();
-      const user = auth?.currentUser || null;
-      const role = appState.currentUserRole || "一般";
-      const payload = {
+// 4) 寫入 Firestore 並更新首頁 F 列摘要
+try {
+  await ensureFirebase();
+  // 先更新/建立裝置型號對照
+  try {
+    if (db && fns.setDoc && fns.doc) {
+      const did = getDeviceId();
+      if (did) {
+        await fns.setDoc(fns.doc(db, 'devices', did), {
+          model: getLocalDeviceModel(),
+          ua: navigator.userAgent || '',
+          platform: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '',
+          updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+        }, { merge: true });
+      }
+    }
+  } catch {}
+  const user = auth?.currentUser || null;
+  const role = appState.currentUserRole || "一般";
+  const payload = {
         uid: user?.uid || null,
         name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || (user?.email || '使用者'),
         role,
@@ -4014,6 +4110,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
         message: photoDataUrl.message || "",
         photoData: photoDataUrl.photo,
         deviceId: getDeviceId(),
+        deviceModel: getLocalDeviceModel(),
         createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
       };
       if (db && fns.addDoc && fns.collection) {
@@ -4065,6 +4162,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
     if (!container) return;
     container.innerHTML = "";
     if (label === "紀錄") {
+      if (isLoadingCheckins) return;
       (async () => {
         try {
           await ensureFirebase();
@@ -4072,17 +4170,33 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
           if (!user) { container.textContent = "請先登入"; return; }
           const ref = fns.collection(db, "checkins");
           const q2 = fns.query(ref, fns.where("uid", "==", user.uid));
+          isLoadingCheckins = true;
           const snap = await fns.getDocs(q2);
-          const tzNow = nowInTZ('Asia/Taipei');
-          const list = [];
-          snap.forEach((doc) => {
-            const data = doc.data();
-            let created = data.createdAt;
-            let dt = null;
-            if (created && typeof created.toDate === 'function') dt = created.toDate(); else if (typeof created === 'string') dt = new Date(created);
-            if (!dt) return;
-            list.push({ id: doc.id, ...data, dt });
-          });
+        const tzNow = nowInTZ('Asia/Taipei');
+        const list = [];
+        snap.forEach((doc) => {
+          const data = doc.data();
+          let created = data.createdAt;
+          let dt = null;
+          if (created && typeof created.toDate === 'function') dt = created.toDate(); else if (typeof created === 'string') dt = new Date(created);
+          if (!dt) return;
+          list.push({ id: doc.id, ...data, dt });
+        });
+          // 預先取得裝置型號對照（避免顯示未知裝置）
+          const deviceIds = Array.from(new Set(list.map((r) => r.deviceId).filter((x) => !!x)));
+          const deviceModelsMap = new Map();
+          if (deviceIds.length && db && fns.getDoc && fns.doc) {
+            await Promise.all(deviceIds.map(async (id) => {
+              try {
+                const ds = await fns.getDoc(fns.doc(db, 'devices', id));
+                if (ds.exists()) {
+                  const dvm = ds.data();
+                  const name = String(dvm.model || dvm.name || '').trim();
+                  if (name) deviceModelsMap.set(id, name);
+                }
+              } catch {}
+            }));
+          }
           const todayYmd = `${tzNow.getFullYear()}-${String(tzNow.getMonth()+1).padStart(2,'0')}-${String(tzNow.getDate()).padStart(2,'0')}`;
           container.innerHTML = `
             <div class="roster-datebar">
@@ -4126,13 +4240,15 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 }
               })();
               const place = r.locationName || '未知地點';
-              const flagHtml = r.inRadius === true ? ' 正常' : ' <span class="status-flag bad">異常</span>';
-              status.innerHTML = `打卡地點：${place} 狀態：<span class="status-label ${stCls}">${st}</span>${flagHtml}`;
+              const flagHtml = r.inRadius === true ? ' <span class="status-flag good">正常</span>' : ' <span class="status-flag bad">異常</span>';
+              status.innerHTML = `打卡地點：<span class="status-label ${stCls}">${place}</span> 狀態：<span class="status-label ${stCls}">${st}</span>${flagHtml}`;
               const dtStr = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
               const when = document.createElement('div');
               when.textContent = `時間：${dtStr}`;
               const dev = document.createElement('div');
-              dev.textContent = `裝置名稱：${getDeviceNameById(r.deviceId)}`;
+              const fallbackShort = (r.deviceId ? `裝置-${String(r.deviceId).slice(-6)}` : '裝置');
+              const modelText = r.deviceModel || deviceModelsMap.get(r.deviceId) || getDeviceModelCache(r.deviceId) || fallbackShort;
+              dev.textContent = `裝置型號：${modelText}`;
               card.appendChild(status);
               card.appendChild(when);
               const mapBtn = document.createElement('button');
@@ -4255,14 +4371,18 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               actions.appendChild(modifyBtn);
               card.appendChild(actions);
               card.appendChild(dev);
-              listRoot.appendChild(card);
-            });
-          }
+            listRoot.appendChild(card);
+          });
+        }
           renderForDate(todayYmd);
           dateInput.addEventListener('change', () => renderForDate(dateInput.value));
+          isLoadingCheckins = false;
         } catch (e) {
           const msg = e?.message || e;
+          const s = String(msg || '');
+          if (s.includes('ERR_ABORTED') || s.includes('documents:runQuery') || s.includes('documents:batchGet')) { isLoadingCheckins = false; return; }
           container.textContent = typeof msg === 'string' ? `載入失敗：${msg}` : "載入失敗：可能為權限或索引設定問題";
+          isLoadingCheckins = false;
         }
       })();
       return;

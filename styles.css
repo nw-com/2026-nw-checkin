@@ -35,6 +35,7 @@ body {
 .brand-title { font-size: 20px; font-weight: 700; }
 .brand-subtitle { font-size: 13px; color: #6b7280; }
 .btn { appearance: none; border: none; background: #111827; color: #ffffff; padding: 12px 16px; border-radius: 10px; font-size: 15px; cursor: pointer; }
+.btn-darkgrey { background: #333333; color: #ffffff; }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 /* 主按鈕 hover/active/pressed 效果 */
 .btn:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.12); transform: translateY(-1px); }
@@ -278,6 +279,7 @@ button[disabled] { cursor: not-allowed; }
 .status-flag.bad { background: #CC0000; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; line-height: 1.4; }
 /* 通用狀態標籤顏色（列表卡片等處） */
 .status-label.work { color: #0f9d58; }
+.status-flag.good { background: #0f9d58; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; line-height: 1.4; }
 .status-label.off { color: #FF0000; }
 .status-label.out { color: #1e88e5; }
 .status-label.arrive { color: #1e88e5; }
@@ -472,5 +474,9 @@ body.status-leave-request { --hero-pulse-rgb: 245,124,0; }
 .record-actions .btn { flex: 1; }
 /* 面板內按鈕統一直角 */
 .panel .btn { border-radius: 0; }
+.btn { border-radius: 0; }
+#modalRoot .input { border: none; text-align: center; }
+#modalRoot select.input { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: transparent; pointer-events: none; }
 .app-header .home-map-overlay { position: absolute; inset: 0; z-index: 1; opacity: 0.40; pointer-events: none; }
 .app-header .home-map-overlay img { width: 100%; height: 100%; object-fit: cover; }
+#modalRoot .form-row .label { display: block; width: 100%; background: #EEEEEE; font-weight: 700; text-align: center; padding: 8px; }
