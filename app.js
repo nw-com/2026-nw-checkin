@@ -75,6 +75,20 @@ const btnLeave = document.getElementById("btnLeave");
 const btnLeaveRequest = document.getElementById("btnLeaveRequest");
 const btnMakeup = document.getElementById("btnMakeup");
 
+try {
+  const origErr = console.error;
+  console.error = function (...args) {
+    const text = args.map((a) => {
+      if (typeof a === 'string') return a;
+      if (a && a.stack) return String(a.stack);
+      if (a && a.message) return String(a.message);
+      return '';
+    }).join(' ');
+    if (text.includes('Firestore/Listen/channel') || text.includes('documents:runQuery') || text.includes('@firebase/firestore') || text.includes('RPC_ERROR')) return;
+    return origErr.apply(console, args);
+  };
+} catch {}
+
 function updateHomeMap() {
   if (!homeMapImg || !lastCoords) return;
   const { latitude, longitude } = lastCoords;
@@ -475,6 +489,78 @@ function getDeviceId() {
       localStorage.setItem(key, idv);
     }
     return idv;
+  } catch {
+    return null;
+  }
+}
+
+function setLastCheckin(uid, payload) {
+  try {
+    if (!uid) return;
+    const key = `lastCheckin:${uid}`;
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {}
+}
+
+function getLastCheckin(uid) {
+  try {
+    if (!uid) return null;
+    const key = `lastCheckin:${uid}`;
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : null;
+  } catch { return null; }
+}
+
+async function getIdToken() {
+  try {
+    const u = auth?.currentUser;
+    if (!u) return null;
+    const t = await u.getIdToken?.();
+    return t || null;
+  } catch { return null; }
+}
+
+async function fetchLastCheckinViaRest(uid) {
+  try {
+    const projectId = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.projectId) || null;
+    if (!projectId || !uid) return null;
+    const token = await getIdToken();
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery`;
+    const body = {
+      structuredQuery: {
+        from: [{ collectionId: "checkins" }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "uid" },
+            op: "EQUAL",
+            value: { stringValue: uid },
+          },
+        },
+        orderBy: [{ field: { fieldPath: "createdAt" }, direction: "DESCENDING" }],
+        limit: 1,
+      },
+    };
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const arr = await res.json().catch(() => []);
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const doc = arr.find((x) => x && x.document && x.document.fields)?.document;
+    if (!doc || !doc.fields) return null;
+    const f = doc.fields;
+    const ts = f.createdAt?.timestampValue || f.createdAt?.stringValue || null;
+    const dt = ts ? new Date(ts) : new Date();
+    const status = f.status?.stringValue || "";
+    const locationName = f.locationName?.stringValue || "";
+    const inRadius = f.inRadius?.booleanValue === true;
+    const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
+    const summary = `${dateStr} ${locationName} ${status} ${inRadius ? '正常' : '異常'}`.trim();
+    return { summary, status };
   } catch {
     return null;
   }
@@ -2448,23 +2534,20 @@ let firebaseApp, auth, db, functionsApp;
   const [
     { initializeApp },
     { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
-    { getFirestore, initializeFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp, query, where, orderBy, limit },
+    { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp, query, where, orderBy, limit },
     { getFunctions, httpsCallable },
   ] = await Promise.all([
     import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
     import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js"),
-    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js"),
+    import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-lite.js"),
     import("https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js"),
   ]);
 
   // 初始化 Firebase
   firebaseApp = initializeApp(FIREBASE_CONFIG);
   auth = getAuth(firebaseApp);
-  // 在部分網路/代理環境下，Firestore 的 WebChannel 可能被中止，改用長輪詢以避免 Listen 連線被瀏覽器中止的噪音錯誤
-  db = initializeFirestore(firebaseApp, {
-    experimentalAutoDetectLongPolling: true,
-    useFetchStreams: false,
-  });
+  // Firestore Lite：使用 REST 請求，不建立 WebChannel/Listen 連線
+  db = getFirestore(firebaseApp);
   // 明確指定雲端函式區域，避免跨區造成呼叫錯誤或 CORS 問題
   functionsApp = getFunctions(firebaseApp, "us-central1");
 
@@ -2498,6 +2581,7 @@ let firebaseApp, auth, db, functionsApp;
         // 顯示主頁
         loginView.classList.add("hidden");
         appView.classList.remove("hidden");
+        setActiveTab(activeMainTab);
 
       // 先以 Auth 設定頁首使用者資訊（後續以 Firestore 覆蓋）
         const initialDisplayName = user.displayName || user.email || "使用者";
@@ -2512,27 +2596,29 @@ let firebaseApp, auth, db, functionsApp;
         if (user.photoURL) homeHeroPhoto.src = user.photoURL; else homeHeroPhoto.removeAttribute("src");
       }
 
-      // 確認或建立使用者文件（role 欄位）
       const userDocRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userDocRef);
       let role = "一般";
-      if (userSnap.exists()) {
-        const data = userSnap.data();
-        role = data.role || role;
-        // 以 Firestore 使用者資料覆蓋頁首姓名與照片（若有）
-        const displayName = data.name || user.displayName || user.email || "使用者";
-        userNameEl.textContent = `歡迎~ ${displayName}`;
-        if (homeHeaderNameEl) homeHeaderNameEl.textContent = displayName;
-        if (userPhotoEl) {
-          const photoFromDoc = data.photoUrl || "";
-          if (photoFromDoc) userPhotoEl.src = photoFromDoc; else if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
+      try {
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap.exists()) {
+          const data = userSnap.data();
+          role = data.role || role;
+          const displayName = data.name || user.displayName || user.email || "使用者";
+          userNameEl.textContent = `歡迎~ ${displayName}`;
+          if (homeHeaderNameEl) homeHeaderNameEl.textContent = displayName;
+          if (userPhotoEl) {
+            const photoFromDoc = data.photoUrl || "";
+            if (photoFromDoc) userPhotoEl.src = photoFromDoc; else if (user.photoURL) userPhotoEl.src = user.photoURL; else userPhotoEl.removeAttribute("src");
+          }
+          if (homeHeroPhoto) {
+            const photoFromDoc = data.photoUrl || "";
+            if (photoFromDoc) homeHeroPhoto.src = photoFromDoc; else if (user.photoURL) homeHeroPhoto.src = user.photoURL; else homeHeroPhoto.removeAttribute("src");
+          }
+        } else {
+          await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
         }
-        if (homeHeroPhoto) {
-          const photoFromDoc = data.photoUrl || "";
-          if (photoFromDoc) homeHeroPhoto.src = photoFromDoc; else if (user.photoURL) homeHeroPhoto.src = user.photoURL; else homeHeroPhoto.removeAttribute("src");
-        }
-    } else {
-        await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
+      } catch (err) {
+        console.warn("載入使用者文件失敗", err);
       }
       // 將目前使用者資訊保存於 appState 供權限檢查
       appState.currentUserId = user.uid;
@@ -2542,31 +2628,28 @@ let firebaseApp, auth, db, functionsApp;
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
       applyPagePermissionsForUser(user);
 
+      const cached = getLastCheckin(user.uid);
+      if (cached && homeStatusEl) {
+        setHomeStatus(cached.key || "work", cached.label || "上班");
+        homeStatusEl.textContent = cached.summary || "";
+      }
+      // 其後使用 SDK 查詢覆蓋最新資料
+
       try {
         const q = fns.query(
           fns.collection(db, "checkins"),
           fns.where("uid", "==", user.uid),
           fns.orderBy("createdAt", "desc"),
-          fns.limit(50)
+          fns.limit(1)
         );
         const snap = await fns.getDocs(q);
-        const tzNow = nowInTZ('Asia/Taipei');
-        const d0 = new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate());
-        const d1 = new Date(d0); d1.setDate(d0.getDate() + 1);
-        let found = null;
-        snap.forEach((docSnap) => {
-          if (found) return;
-          const d = docSnap.data();
+        if (!snap.empty) {
+          const d = snap.docs[0].data();
           const val = d.createdAt;
-          let dt = null;
-          if (val && typeof val.toDate === 'function') dt = val.toDate(); else if (typeof val === 'string') dt = new Date(val);
-          if (!dt) return;
-          if (dt >= d0 && dt < d1) found = { data: d, dt };
-        });
-        const gRow = document.querySelector('.row-g');
-        if (found && gRow) {
-          const d = found.data;
-          const dt = found.dt;
+          let dt;
+          if (val && typeof val.toDate === 'function') dt = val.toDate();
+          else if (typeof val === 'string') dt = new Date(val);
+          else dt = new Date();
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
           const summary = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
           const label = d.status || '';
@@ -2584,10 +2667,49 @@ let firebaseApp, auth, db, functionsApp;
           };
           setHomeStatus(mapLabelToKey(label), label);
           if (homeStatusEl) homeStatusEl.textContent = summary;
-        } else if (gRow) {
-          gRow.textContent = '';
+          setLastCheckin(user.uid, { summary, key: mapLabelToKey(label), label });
+        } else {
+          if (homeStatusEl) homeStatusEl.textContent = '';
         }
-      } catch (e) {}
+      } catch (e) {
+        try {
+          const q2 = fns.query(
+            fns.collection(db, "checkins"),
+            fns.where("uid", "==", user.uid)
+          );
+          const snap2 = await fns.getDocs(q2);
+          let best = null;
+          snap2.forEach((docSnap) => {
+            const d = docSnap.data();
+            const val = d.createdAt;
+            let dt = null;
+            if (val && typeof val.toDate === 'function') dt = val.toDate(); else if (typeof val === 'string') dt = new Date(val);
+            if (!dt) return;
+            if (!best || dt > best.dt) best = { data: d, dt };
+          });
+          if (best) {
+            const d = best.data; const dt = best.dt;
+            const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
+            const summary = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
+            const label = d.status || '';
+            const mapLabelToKey = (s) => {
+              switch (s) {
+                case '上班': return 'work';
+                case '下班': return 'off';
+                case '外出': return 'out';
+                case '抵達': return 'arrive';
+                case '返回': return 'return';
+                case '離開': return 'leave';
+                case '請假': return 'leave-request';
+                default: return 'work';
+              }
+            };
+            setHomeStatus(mapLabelToKey(label), label);
+            if (homeStatusEl) homeStatusEl.textContent = summary;
+            setLastCheckin(user.uid, { summary, key: mapLabelToKey(label), label });
+          }
+        } catch {}
+      }
 
       // 從 Firestore 載入 users 清單，帶入帳號列表
       await loadAccountsFromFirestore();
@@ -2825,21 +2947,8 @@ let firebaseApp, auth, db, functionsApp;
 
   function applyPagePermissionsForUser(user) {
     try {
-      const account = appState.accounts.find((a) => a.email && user.email && a.email.toLowerCase() === user.email.toLowerCase());
-      const allowed = new Set(["home", "checkin"]);
-      if (account && Array.isArray(account.pagePermissions) && account.pagePermissions.length) {
-        account.pagePermissions.forEach((k) => allowed.add(k));
-        tabButtons.forEach((b) => {
-          const k = b.dataset.tab;
-          if (!allowed.has(k)) b.classList.add("hidden"); else b.classList.remove("hidden");
-        });
-        // 僅控制可視分頁，不強制切換目前分頁
-      } else {
-        // 未設定權限時顯示所有分頁
-        tabButtons.forEach((b) => b.classList.remove("hidden"));
-      }
+      tabButtons.forEach((b) => b.classList.remove("hidden"));
     } catch (_) {
-      // 任意錯誤下，顯示所有分頁
       tabButtons.forEach((b) => b.classList.remove("hidden"));
     }
   }
@@ -3428,8 +3537,7 @@ let firebaseApp, auth, db, functionsApp;
     }
   }
 
-  // 初始分頁
-  setActiveTab("home");
+  setActiveTab(activeMainTab);
 
   // 內部功能：定位與打卡
   function initGeolocation() {
@@ -3804,9 +3912,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       const fRow = document.querySelector('.row-f');
       const now = new Date();
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-      if (gRow) {
-        gRow.textContent = '';
-      }
+      // 不清空 row-g，避免移除 #homeStatus 元素
       if (fRow) {
         fRow.textContent = '';
         fRow.classList.add('hidden');
@@ -3815,6 +3921,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       setHomeStatus(statusKey, statusLabel);
       const summary = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
       if (homeStatusEl) homeStatusEl.textContent = summary;
+      try { const u = auth?.currentUser; if (u?.uid) setLastCheckin(u.uid, { summary, key: statusKey, label: statusLabel }); } catch {}
     } catch (err) {
       alert(`打卡資料寫入失敗：${err?.message || err}`);
     }
@@ -3846,8 +3953,15 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
           const user = auth?.currentUser || null;
           if (!user) { container.textContent = "請先登入"; return; }
           const ref = fns.collection(db, "checkins");
-          const q = fns.query(ref, fns.where("uid", "==", user.uid), fns.orderBy("createdAt", "desc"), fns.limit(50));
-          const snap = await fns.getDocs(q);
+          let snap;
+          try {
+            const q = fns.query(ref, fns.where("uid", "==", user.uid), fns.orderBy("createdAt", "desc"), fns.limit(50));
+            snap = await fns.getDocs(q);
+          } catch (err) {
+            // 後備查詢：僅使用 where 篩選，並於前端排序
+            const q2 = fns.query(ref, fns.where("uid", "==", user.uid));
+            snap = await fns.getDocs(q2);
+          }
           const tzNow = nowInTZ('Asia/Taipei');
           const d0 = new Date(tzNow.getFullYear(), tzNow.getMonth(), tzNow.getDate());
           const d1 = new Date(d0); d1.setDate(d0.getDate() + 1);
@@ -3858,10 +3972,12 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             let dt = null;
             if (created && typeof created.toDate === 'function') dt = created.toDate(); else if (typeof created === 'string') dt = new Date(created);
             if (!dt) return;
-            if (dt >= d0 && dt < d1) list.push({ id: doc.id, ...data, dt });
+            list.push({ id: doc.id, ...data, dt });
           });
-          if (!list.length) { container.textContent = "今日無打卡紀錄"; return; }
-          list.forEach((r) => {
+          // 今日篩選並依時間倒序
+          const todayList = list.filter((r) => r.dt >= d0 && r.dt < d1).sort((a, b) => b.dt - a.dt).slice(0, 50);
+          if (!todayList.length) { container.textContent = "今日無打卡紀錄"; return; }
+          todayList.forEach((r) => {
             const card = document.createElement("div");
             card.style.display = "grid";
             card.style.gridTemplateColumns = "1fr";
@@ -3904,7 +4020,8 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             container.appendChild(card);
           });
         } catch (e) {
-          container.textContent = `載入失敗：${e?.message || e}`;
+          const msg = e?.message || e;
+          container.textContent = typeof msg === 'string' ? `載入失敗：${msg}` : "載入失敗：可能為權限或索引設定問題";
         }
       })();
       return;
