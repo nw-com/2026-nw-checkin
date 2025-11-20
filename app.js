@@ -373,6 +373,10 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
       input = document.createElement("select");
       input.className = "input";
       input.setAttribute("lang", "zh-Hant");
+      input.style.webkitAppearance = "";
+      input.style.mozAppearance = "";
+      input.style.appearance = "";
+      input.style.pointerEvents = "auto";
       (f.options || []).forEach((opt) => {
         const o = document.createElement("option");
         o.value = opt.value;
@@ -518,6 +522,22 @@ function closeModal() {
   modalRoot.innerHTML = "";
 }
 
+async function withRetry(fn, times = 3, delay = 500) {
+  let lastErr = null;
+  for (let i = 0; i < times; i++) {
+    try { return await fn(); } catch (e) {
+      lastErr = e;
+      const s = String(e && e.message ? e.message : e);
+      if (i < times - 1 && (s.includes('ERR_ABORTED') || s.includes('AbortError') || s.includes('NetworkError'))) {
+        await new Promise((r) => setTimeout(r, delay * Math.pow(2, i)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 function getDeviceId() {
   try {
     const key = "deviceId";
@@ -596,7 +616,7 @@ async function initDeviceProfile() {
       platform: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "",
       updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
     };
-    await fns.setDoc(fns.doc(db, "devices", id), payload, { merge: true });
+    await withRetry(() => fns.setDoc(fns.doc(db, "devices", id), payload, { merge: true }));
     setDeviceModelCache(id, payload.model);
   } catch {}
 }
@@ -2316,21 +2336,32 @@ function renderSettingsAccounts() {
             return false;
           }
 
-          // 嘗試透過雲端函式建立 Auth 使用者（不影響目前登入的管理員）
+          // 嘗試建立 Auth 使用者（優先雲端函式，失敗或未配置則改用 REST）
           let createdUid = null;
-          if (fns.functions && fns.httpsCallable && d.email && d.password) {
-            try {
-              const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
-              const res = await createUser({
-                email: d.email,
-                password: d.password,
-                name: d.name || "",
-                photoUrl: d.photoUrl || "",
-              });
-              createdUid = res?.data?.uid || null;
-            } catch (err) {
-              console.warn("adminCreateUser 失敗", err);
-              alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+          if (d.email && d.password) {
+            if (fns.functions && fns.httpsCallable) {
+              try {
+                const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
+                const res = await createUser({ email: d.email, password: d.password, name: d.name || "", photoUrl: d.photoUrl || "" });
+                createdUid = res?.data?.uid || null;
+              } catch (err) {
+                console.warn("adminCreateUser 失敗，改用 REST 建立", err);
+                try {
+                  const r = await createAuthUserViaRest(d.email, d.password);
+                  createdUid = r.uid || null;
+                } catch (err2) {
+                  console.warn("REST 建立 Auth 失敗", err2);
+                  alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+                }
+              }
+            } else {
+              try {
+                const r = await createAuthUserViaRest(d.email, d.password);
+                createdUid = r.uid || null;
+              } catch (err2) {
+                console.warn("REST 建立 Auth 失敗", err2);
+                alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+              }
             }
           }
 
@@ -2359,14 +2390,14 @@ function renderSettingsAccounts() {
           let newId = null;
           if (createdUid) {
             const ref = fns.doc(db, "users", createdUid);
-            await fns.setDoc(ref, payload);
+            await withRetry(() => fns.setDoc(ref, payload));
             newId = createdUid;
           } else {
-            const docRef = await fns.addDoc(fns.collection(db, "users"), payload);
+            const docRef = await withRetry(() => fns.addDoc(fns.collection(db, "users"), payload));
             newId = docRef.id;
           }
-          // 僅在前端狀態保留密碼欄位作為表格顯示，不寫入 Firestore
           appState.accounts.push({ id: newId, ...d, uid: createdUid || null });
+          alert("儲存成功");
         } catch (err) {
           alert(`儲存帳號失敗：${err?.message || err}`);
           return false;
@@ -2391,8 +2422,6 @@ function renderSettingsAccounts() {
             { key: "title", label: "職稱", type: "text" },
             { key: "email", label: "電子郵件", type: "email" },
             { key: "phone", label: "手機號碼", type: "text" },
-            { key: "password", label: "預設密碼", type: "text" },
-            { key: "passwordConfirm", label: "確認密碼", type: "text" },
             { key: "emergencyName", label: "緊急聯絡人", type: "text" },
             { key: "emergencyRelation", label: "緊急聯絡人關係", type: "text" },
             { key: "emergencyPhone", label: "緊急聯絡人手機號碼", type: "text" },
@@ -2413,6 +2442,29 @@ function renderSettingsAccounts() {
             { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
           ],
           initial: a,
+          afterRender: ({ footer }) => {
+            const btnReset = document.createElement("button");
+            btnReset.className = "btn btn-grey";
+            btnReset.textContent = "重設密碼";
+            attachPressInteractions(btnReset);
+            btnReset.addEventListener("click", async () => {
+              try {
+                await ensureFirebase();
+                const targetEmail = a.email || null;
+                if (!targetEmail) { alert("此帳號缺少電子郵件，無法寄送重設密碼信。"); return; }
+                if (auth) { try { auth.languageCode = "zh-TW"; } catch {} }
+                if (fns.sendPasswordResetEmail && auth) {
+                  await fns.sendPasswordResetEmail(auth, targetEmail);
+                  alert(`已寄送重設密碼信到「${targetEmail}」。`);
+                } else {
+                  alert("未初始化寄送重設密碼功能。");
+                }
+              } catch (e) {
+                alert(`寄送重設密碼信失敗：${e?.message || e}`);
+              }
+            });
+            footer.insertBefore(btnReset, footer.firstChild);
+          },
           onSubmit: async (d) => {
             try {
               if (appState.currentUserRole !== "系統管理員") {
@@ -2420,54 +2472,6 @@ function renderSettingsAccounts() {
                 return false;
               }
               if (!db || !fns.setDoc || !fns.doc) throw new Error("Firestore 未初始化");
-
-              // 若提供新密碼且確認一致，嘗試更新 Auth 密碼；失敗時改寄送重設密碼信
-              if (d.password && d.passwordConfirm) {
-                if (d.password !== d.passwordConfirm) {
-                  alert("新密碼與確認密碼不一致。");
-                  return false;
-                }
-                if (fns.functions && fns.httpsCallable) {
-                  try {
-                    const updatePwd = fns.httpsCallable(fns.functions, "adminUpdateUserPassword");
-                    await updatePwd({
-                      uid: a.uid || null,
-                      email: a.email || d.email || null,
-                      newPassword: d.password,
-                    });
-                    alert("已更新登入頁面的密碼。");
-                  } catch (err) {
-                    console.warn("adminUpdateUserPassword 失敗，改寄送重設密碼信", err);
-                    const targetEmail = a.email || d.email || null;
-                    if (targetEmail && fns.sendPasswordResetEmail && auth) {
-                      try {
-                        await fns.sendPasswordResetEmail(auth, targetEmail);
-                        alert(`已寄送重設密碼信到「${targetEmail}」。`);
-                      } catch (e2) {
-                        alert(`更新登入密碼失敗且寄送重設信也失敗：${e2?.message || e2}`);
-                        return false;
-                      }
-                    } else {
-                      alert("更新登入密碼失敗：未取得使用者 Email 或尚未初始化寄送重設密碼功能。");
-                      return false;
-                    }
-                  }
-                } else {
-                  const targetEmail = a.email || d.email || null;
-                  if (targetEmail && fns.sendPasswordResetEmail && auth) {
-                    try {
-                      await fns.sendPasswordResetEmail(auth, targetEmail);
-                      alert(`尚未設定雲端函式，已改寄送重設密碼信到「${targetEmail}」。`);
-                    } catch (e2) {
-                      alert(`尚未設定雲端函式且寄送重設信也失敗：${e2?.message || e2}`);
-                      return false;
-                    }
-                  } else {
-                    alert("尚未設定雲端函式且無法寄送重設密碼信（缺少 Email 或初始化）。");
-                    return false;
-                  }
-                }
-              }
 
               const payload = {
                 photoUrl: d.photoUrl ?? a.photoUrl ?? "",
@@ -2490,9 +2494,15 @@ function renderSettingsAccounts() {
                 status: d.status ?? a.status ?? "在職",
                 updatedAt: fns.serverTimestamp(),
               };
-              await fns.setDoc(fns.doc(db, "users", aid), payload, { merge: true });
-              // 在前端狀態更新顯示資料（保留密碼欄位僅供表格顯示，不寫入 Firestore）
+              await withRetry(() => fns.setDoc(fns.doc(db, "users", aid), payload, { merge: true }));
               Object.assign(a, { ...d, uid: payload.uid });
+
+              // 若編輯的是目前登入者，立即套用頁面權限變更
+              if (appState.currentUserId && appState.currentUserId === aid) {
+                appState.currentUserPagePermissions = Array.isArray(payload.pagePermissions) ? payload.pagePermissions : [];
+                applyPagePermissionsForUser({ uid: aid });
+              }
+              alert("儲存成功");
             } catch (err) {
               alert(`更新帳號失敗：${err?.message || err}`);
               return false;
@@ -2509,7 +2519,7 @@ function renderSettingsAccounts() {
           if (!ok) return;
           try {
             if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
-            await fns.deleteDoc(fns.doc(db, "users", aid));
+            await withRetry(() => fns.deleteDoc(fns.doc(db, "users", aid)));
             appState.accounts = appState.accounts.filter((x) => x.id !== aid);
             renderSettingsContent("帳號");
           } catch (err) {
@@ -2652,14 +2662,14 @@ function renderSettingsAccounts() {
             }
 
             // 刪除待審核紀錄
-            await fns.deleteDoc(fns.doc(db, "pendingAccounts", pid));
+            await withRetry(() => fns.deleteDoc(fns.doc(db, "pendingAccounts", pid)));
 
             // 更新前端狀態與 UI
             // 若成功建立 Auth，覆蓋 users 文件為該 uid
             if (authUid) {
               try {
                 const ref = fns.doc(db, "users", authUid);
-                await fns.setDoc(ref, payload, { merge: true });
+                await withRetry(() => fns.setDoc(ref, payload, { merge: true }));
                 appState.accounts.push({ id: authUid, ...payload, uid: authUid });
               } catch (e) {
                 // 若覆蓋失敗，至少保留先前 addDoc 版本
@@ -2668,8 +2678,8 @@ function renderSettingsAccounts() {
             } else {
               appState.accounts.push({ id: userDoc.id, ...payload });
             }
-            appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
-            renderSettingsContent("帳號");
+              appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
+              renderSettingsContent("帳號");
             // 提示狀態：已核准基本資料；若未建立 Auth，提醒管理者後續處理
             if (authCreated) {
               alert("核准完成：已加入帳號列表，登入預設密碼為 000000。");
@@ -2826,6 +2836,7 @@ let ensureFirebasePromise = null;
         if (userSnap.exists()) {
           const data = userSnap.data();
           role = data.role || role;
+          appState.currentUserPagePermissions = Array.isArray(data.pagePermissions) ? data.pagePermissions : [];
           const displayName = data.name || user.displayName || user.email || "使用者";
           userNameEl.textContent = `歡迎~ ${displayName}`;
           if (homeHeaderNameEl) homeHeaderNameEl.textContent = displayName;
@@ -2849,7 +2860,7 @@ let ensureFirebasePromise = null;
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
-        applyPagePermissionsForUser(user);
+      applyPagePermissionsForUser(user);
 
         // 紀錄目前裝置型號至 Firestore（供其他裝置顯示）
         initDeviceProfile();
@@ -3252,13 +3263,24 @@ let ensureFirebasePromise = null;
     }
   }
 
-  function applyPagePermissionsForUser(user) {
-    try {
-      tabButtons.forEach((b) => b.classList.remove("hidden"));
-    } catch (_) {
-      tabButtons.forEach((b) => b.classList.remove("hidden"));
-    }
+function applyPagePermissionsForUser(user) {
+  try {
+    const role = appState.currentUserRole || "一般";
+    const allowed = (role === "系統管理員")
+      ? ["home","checkin","leader","manage","feature","settings","personnel"]
+      : (Array.isArray(appState.currentUserPagePermissions) ? ["home", ...appState.currentUserPagePermissions] : ["home"]);
+    tabButtons.forEach((b) => {
+      const t = b.dataset.tab || "";
+      const show = allowed.includes(t);
+      b.classList.toggle("hidden", !show);
+    });
+    // 若目前選中的分頁被隱藏，跳回首頁
+    const currentShown = allowed.includes(activeMainTab);
+    if (!currentShown) setActiveTab("home");
+  } catch (_) {
+    tabButtons.forEach((b) => b.classList.remove("hidden"));
   }
+}
 
   function resetPagePermissions() {
     tabButtons.forEach((b) => b.classList.remove("hidden"));
