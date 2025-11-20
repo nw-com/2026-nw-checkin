@@ -1266,7 +1266,6 @@ async function importAccountsFromXLSX(file) {
         role: r["角色"] || "一般",
         companyId,
         serviceCommunities: serviceIds,
-        pagePermissions: [],
         status: r["狀況"] || "在職",
         updatedAt: fns?.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
       };
@@ -1327,11 +1326,10 @@ if (applyAccountBtn) {
             phone: d.phone || "",
             licenses: Array.isArray(d.licenses) ? d.licenses : [],
             role: "一般",
-            companyId: null,
-            serviceCommunities: [],
-            pagePermissions: [],
-            status: "待審核",
-          };
+        companyId: null,
+        serviceCommunities: [],
+        status: "待審核",
+      };
           if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
             const docRef = await fns.addDoc(fns.collection(db, "pendingAccounts"), {
               ...pendingPayload,
@@ -2312,14 +2310,6 @@ function renderSettingsAccounts() {
         { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})) },
         { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
         { key: "serviceCommunities", label: "服務社區", type: "multiselect", options: optionList(appState.communities) },
-        { key: "pagePermissions", label: "頁面權限", type: "multiselect", options: [
-          { value: "checkin", label: "打卡" },
-          { value: "leader", label: "幹部" },
-          { value: "manage", label: "管理" },
-          { value: "feature", label: "功能" },
-          { value: "settings", label: "設定" },
-          { value: "personnel", label: "人事" },
-        ] },
         { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
       ],
       onSubmit: async (d) => {
@@ -2378,14 +2368,13 @@ function renderSettingsAccounts() {
             emergencyPhone: d.emergencyPhone || "",
             bloodType: d.bloodType || "",
             birthdate: d.birthdate || "",
-            licenses: Array.isArray(d.licenses) ? d.licenses : [],
-            role: d.role || "一般",
-            companyId: d.companyId || null,
-            serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
-            pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : [],
-            status: d.status || "在職",
-            createdAt: fns.serverTimestamp(),
-          };
+          licenses: Array.isArray(d.licenses) ? d.licenses : [],
+          role: d.role || "一般",
+          companyId: d.companyId || null,
+          serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
+          status: d.status || "在職",
+          createdAt: fns.serverTimestamp(),
+        };
           // 若有建立 Auth 帳號，使用其 uid 作為文件 ID；否則使用自動 ID
           let newId = null;
           if (createdUid) {
@@ -2431,14 +2420,6 @@ function renderSettingsAccounts() {
             { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})) },
             { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
             { key: "serviceCommunities", label: "服務社區", type: "multiselect", options: optionList(appState.communities) },
-            { key: "pagePermissions", label: "頁面權限", type: "multiselect", options: [
-              { value: "checkin", label: "打卡" },
-              { value: "leader", label: "幹部" },
-              { value: "manage", label: "管理" },
-              { value: "feature", label: "功能" },
-              { value: "settings", label: "設定" },
-              { value: "personnel", label: "人事" },
-            ] },
             { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
           ],
           initial: a,
@@ -2490,16 +2471,13 @@ function renderSettingsAccounts() {
                 role: d.role ?? a.role ?? "一般",
                 companyId: d.companyId ?? a.companyId ?? null,
                 serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : (Array.isArray(a.serviceCommunities) ? a.serviceCommunities : []),
-                pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : (Array.isArray(a.pagePermissions) ? a.pagePermissions : []),
                 status: d.status ?? a.status ?? "在職",
                 updatedAt: fns.serverTimestamp(),
               };
               await withRetry(() => fns.setDoc(fns.doc(db, "users", aid), payload, { merge: true }));
               Object.assign(a, { ...d, uid: payload.uid });
-
-              // 若編輯的是目前登入者，立即套用頁面權限變更
               if (appState.currentUserId && appState.currentUserId === aid) {
-                appState.currentUserPagePermissions = Array.isArray(payload.pagePermissions) ? payload.pagePermissions : [];
+                appState.currentUserRole = payload.role || appState.currentUserRole || "一般";
                 applyPagePermissionsForUser({ uid: aid });
               }
               alert("儲存成功");
@@ -2623,11 +2601,10 @@ function renderSettingsAccounts() {
               licenses: Array.isArray(item.licenses) ? item.licenses : [],
               role: item.role || "一般",
               companyId: item.companyId || null,
-              serviceCommunities: Array.isArray(item.serviceCommunities) ? item.serviceCommunities : [],
-              pagePermissions: Array.isArray(item.pagePermissions) ? item.pagePermissions : [],
-              status: "在職",
-              createdAt: fns.serverTimestamp(),
-            };
+        serviceCommunities: Array.isArray(item.serviceCommunities) ? item.serviceCommunities : [],
+        status: "在職",
+        createdAt: fns.serverTimestamp(),
+      };
             const userDoc = await fns.addDoc(fns.collection(db, "users"), payload);
 
             // 建立 Auth 帳號（先雲端函式，失敗則 REST），預設密碼 000000
@@ -2836,7 +2813,6 @@ let ensureFirebasePromise = null;
         if (userSnap.exists()) {
           const data = userSnap.data();
           role = data.role || role;
-          appState.currentUserPagePermissions = Array.isArray(data.pagePermissions) ? data.pagePermissions : [];
           const displayName = data.name || user.displayName || user.email || "使用者";
           userNameEl.textContent = `歡迎~ ${displayName}`;
           if (homeHeaderNameEl) homeHeaderNameEl.textContent = displayName;
@@ -3114,10 +3090,9 @@ let ensureFirebasePromise = null;
           licenses: Array.isArray(d.licenses) ? d.licenses : [],
           role: d.role || "一般",
           companyId: d.companyId || null,
-          serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
-          pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : [],
-          status: d.status || "在職",
-        });
+        serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
+        status: d.status || "在職",
+      });
       });
       items.forEach((it) => {
         const idx = appState.accounts.findIndex((a) => a.id === it.id);
@@ -3247,10 +3222,9 @@ let ensureFirebasePromise = null;
           licenses: Array.isArray(d.licenses) ? d.licenses : [],
           role: d.role || "一般",
           companyId: d.companyId || null,
-          serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
-          pagePermissions: Array.isArray(d.pagePermissions) ? d.pagePermissions : [],
-          status: d.status || "待審核",
-        });
+        serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
+        status: d.status || "待審核",
+      });
       });
       // 覆蓋或新增到前端狀態
       items.forEach((it) => {
@@ -3266,15 +3240,35 @@ let ensureFirebasePromise = null;
 function applyPagePermissionsForUser(user) {
   try {
     const role = appState.currentUserRole || "一般";
-    const allowed = (role === "系統管理員")
-      ? ["home","checkin","leader","manage","feature","settings","personnel"]
-      : (Array.isArray(appState.currentUserPagePermissions) ? ["home", ...appState.currentUserPagePermissions] : ["home"]);
+    let allowed = ["home"]; // 基本首頁永遠顯示
+    switch (role) {
+      case "系統管理員":
+        allowed = ["home","checkin","leader","manage","feature","personnel","settings"];
+        break;
+      case "管理層":
+        allowed = ["home","checkin","leader","manage","feature","personnel"];
+        break;
+      case "高階主管":
+        allowed = ["home","checkin","manage","feature"];
+        break;
+      case "初階主管":
+        allowed = ["home","checkin","manage","feature"];
+        break;
+      case "行政":
+        allowed = ["home","checkin","feature"];
+        break;
+      case "勤務":
+        allowed = ["home","checkin","feature"];
+        break;
+      default: // 一般
+        allowed = ["home","checkin","feature"];
+        break;
+    }
     tabButtons.forEach((b) => {
       const t = b.dataset.tab || "";
       const show = allowed.includes(t);
       b.classList.toggle("hidden", !show);
     });
-    // 若目前選中的分頁被隱藏，跳回首頁
     const currentShown = allowed.includes(activeMainTab);
     if (!currentShown) setActiveTab("home");
   } catch (_) {
