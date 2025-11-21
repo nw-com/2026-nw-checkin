@@ -324,6 +324,7 @@ if (togglePasswordBtn) {
   currentUserId: null,
   currentUserRole: null,
   currentUserEmail: null,
+  leaderCompanyFilter: null,
 };
 
 function id() {
@@ -3809,6 +3810,35 @@ function applyPagePermissionsForUser(user) {
     const tabs = SUB_TABS[mainTab] || [];
     subTabsEl.innerHTML = "";
     if (!tabs.length) return;
+    if (mainTab === 'leader') {
+      const sel = document.createElement('select');
+      sel.className = 'subtab-select';
+      sel.id = 'leaderCompanySelect';
+      const companies = Array.isArray(appState.companies) ? appState.companies : [];
+      const me = appState.accounts.find((a) => a.id === appState.currentUserId) || null;
+      const meCompanyIds = Array.isArray(me?.companyIds) ? me.companyIds : (me?.companyId ? [me.companyId] : []);
+      const onlyOne = meCompanyIds.length === 1 ? meCompanyIds[0] : null;
+      if (companies.length) {
+        companies.forEach((co) => {
+          const opt = document.createElement('option');
+          opt.value = co.id;
+          opt.textContent = co.name || co.id;
+          sel.appendChild(opt);
+        });
+      }
+      if (onlyOne) {
+        appState.leaderCompanyFilter = onlyOne;
+        sel.value = onlyOne;
+        sel.disabled = true;
+      } else if (appState.leaderCompanyFilter) {
+        sel.value = appState.leaderCompanyFilter;
+      }
+      sel.addEventListener('change', () => {
+        appState.leaderCompanyFilter = sel.value || null;
+        setActiveSubTab(activeSubTab);
+      });
+      subTabsEl.appendChild(sel);
+    }
     tabs.forEach((label, idx) => {
       const btn = document.createElement("button");
       btn.className = "subtab-btn";
@@ -4219,7 +4249,13 @@ function applyPagePermissionsForUser(user) {
       if (info) info.textContent = `日期：${dateStr}`;
       const sel = document.getElementById("rosterOfficerSelect");
       if (sel) {
-        const officers = appState.accounts.filter((a) => (a.role || "").includes("主管") || (a.role || "").includes("管理"));
+        const coId = appState.leaderCompanyFilter || null;
+        const officers = appState.accounts.filter((a) => {
+          const isOfficer = (a.role || "").includes("主管") || (a.role || "").includes("管理");
+          if (!coId) return isOfficer;
+          const ids = Array.isArray(a.companyIds) ? a.companyIds : (a.companyId ? [a.companyId] : []);
+          return isOfficer && ids.includes(coId);
+        });
         const opts = officers.length ? officers : appState.accounts.slice(0, 10);
         opts.forEach((a) => {
           const opt = document.createElement("option");
@@ -5599,6 +5635,125 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
       })();
       return;
     }
+    if (label === "計點") {
+      (async () => {
+        try {
+          await ensureFirebase();
+          const user = auth?.currentUser || null;
+          if (!user) { container.textContent = "請先登入"; return; }
+          const ref = fns.collection(db, "checkins");
+          const q2 = fns.query(ref, fns.where("uid", "==", user.uid));
+          const snap = await fns.getDocs(q2);
+          const records = [];
+          snap.forEach((doc) => {
+            const data = doc.data() || {};
+            let created = data.createdAt;
+            let dt = null;
+            if (created && typeof created.toDate === 'function') dt = created.toDate(); else if (typeof created === 'string') dt = new Date(created);
+            if (!dt) dt = new Date();
+            records.push({ id: doc.id, ...data, dt });
+          });
+          let rules = appState.pointsRules || [];
+          try {
+            const rref = fns.collection(db, 'pointsRules');
+            const rsnap = await fns.getDocs(rref);
+            const list = [];
+            rsnap.forEach((doc) => { const d = doc.data() || {}; list.push({ id: doc.id, ...d }); });
+            rules = list;
+            appState.pointsRules = list;
+          } catch {}
+          const html = `
+            <div class="block" id="block-checkin-points">
+              <div class="block-header"><span class="block-title">計點列表</span><div class="block-actions"><span id="pointsMonthTotal">本月總計：0</span></div></div>
+              <div class="table-wrapper">
+                <table class="table" aria-label="計點列表">
+                  <thead>
+                    <tr>
+                      <th>日期</th>
+                      <th>事由</th>
+                      <th>狀態</th>
+                      <th>計點</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="checkinPointsTbody"></tbody>
+                </table>
+              </div>
+            </div>`;
+          container.innerHTML = html;
+          const tbody = container.querySelector('#checkinPointsTbody');
+          const calcPoints = (rec) => {
+            const statusFlag = (rec.inRadius === true) ? '正常' : '異常';
+            const statusText = String(rec.status || '').trim();
+            const baseStatus = statusText.split('-')[0];
+            const reason = baseStatus || statusText;
+            const found = rules.find((r) => String(r.reason||'') === reason && String(r.status||'') === statusFlag) || null;
+            return { statusFlag, reason, points: found ? Number(found.points || 0) : 0 };
+          };
+          if (tbody) {
+            const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            const rows = records.sort((a,b)=>b.dt - a.dt).map((rec) => {
+              const { statusFlag, reason, points } = calcPoints(rec);
+              return `<tr data-id="${rec.id}"><td>${formatDate(rec.dt)}</td><td>${reason}</td><td>${statusFlag}</td><td>${points}</td><td class="cell-actions"><button class="btn btn-orange" data-act="appeal">申訴</button></td></tr>`;
+            }).join('');
+            tbody.innerHTML = rows;
+          }
+          try {
+            const mEl = container.querySelector('#pointsMonthTotal');
+            const tzNow = nowInTZ('Asia/Taipei');
+            const y = tzNow.getFullYear();
+            const m = tzNow.getMonth();
+            const start = new Date(y, m, 1);
+            const end = new Date(y, m + 1, 1);
+            const total = records.reduce((sum, rec) => {
+              if (rec.dt >= start && rec.dt < end) {
+                const { points } = calcPoints(rec);
+                return sum + (Number(points) || 0);
+              }
+              return sum;
+            }, 0);
+            if (mEl) mEl.textContent = `本月總計：${total}`;
+          } catch {}
+          const table = container.querySelector('#block-checkin-points table');
+          table?.addEventListener('click', async (e) => {
+            const t = e.target;
+            if (!(t instanceof HTMLElement)) return;
+            const act = t.dataset.act || '';
+            if (act !== 'appeal') return;
+            const tr = t.closest('tr');
+            const idv = tr?.getAttribute('data-id') || '';
+            const rec = records.find((x) => x.id === idv);
+            if (!rec) return;
+            const { statusFlag, reason, points } = calcPoints(rec);
+            openModal({
+              title: '提出申訴',
+              fields: [
+                { key: 'appealText', label: '申訴說明', type: 'text', placeholder: '請描述理由' },
+              ],
+              submitText: '送出',
+              refreshOnSubmit: false,
+              onSubmit: async (data) => {
+                try {
+                  await ensureFirebase();
+                  const u = auth?.currentUser || null;
+                  const payload = { uid: u?.uid || null, checkinId: rec.id, reason: reason || '', status: statusFlag, points, appealText: String(data.appealText || ''), createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(), state: '送審' };
+                  if (db && fns.addDoc && fns.collection) { await fns.addDoc(fns.collection(db, 'pointAppeals'), payload); }
+                  t.textContent = '已申訴'; t.disabled = true;
+                  return true;
+                } catch (e) {
+                  alert(`申訴失敗：${e?.message || e}`);
+                  return false;
+                }
+              }
+            });
+          });
+        } catch (e) {
+          const msg = e?.message || e;
+          container.textContent = typeof msg === 'string' ? `載入失敗：${msg}` : "載入失敗";
+        }
+      })();
+      return;
+    }
     if (label === "班表") {
       const html = `
         <div class="roster-layout" role="region" aria-label="班表">
@@ -5728,7 +5883,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
 function renderSettingsRules() {
   settingsContent.innerHTML = `
     <div class="block" id="block-rules">
-      <div class="block-header"><span class="block-title">計點列表</span></div>
+      <div class="block-header"><span class="block-title">計點列表</span><div class="block-actions"><button id="btnAddRule" class="btn">新增</button></div></div>
       <div class="table-wrapper">
         <table class="table" aria-label="計點列表">
           <thead>
@@ -5746,6 +5901,52 @@ function renderSettingsRules() {
     </div>`;
   const table = settingsContent.querySelector('#block-rules table');
   const tbody = settingsContent.querySelector('#rulesTbody');
+  const addBtn = settingsContent.querySelector('#btnAddRule');
+  const role = appState.currentUserRole || '一般';
+  const isAdmin = role === '系統管理員';
+  if (!isAdmin) {
+    try {
+      addBtn?.parentElement?.removeChild(addBtn);
+      const thOps = table?.querySelector('thead tr th:last-child');
+      thOps?.parentElement?.removeChild(thOps);
+    } catch {}
+  }
+  if (addBtn) {
+    attachPressInteractions(addBtn);
+    addBtn.addEventListener('click', () => {
+      openModal({
+        title: '新增計點規則',
+        fields: [
+          { key: 'reason', label: '事由', type: 'text' },
+          { key: 'handle', label: '處理', type: 'text' },
+          { key: 'status', label: '狀態', type: 'select', options: [ { value: '正常', label: '正常' }, { value: '異常', label: '異常' } ] },
+          { key: 'points', label: '計點', type: 'number', step: 1 },
+        ],
+        initial: { status: '正常', points: 0 },
+        submitText: '新增',
+        refreshOnSubmit: false,
+        onSubmit: async (data) => {
+          try {
+            await ensureFirebase();
+            const payload = { reason: String(data.reason || ''), handle: String(data.handle || ''), status: String(data.status || '正常'), points: (data.points != null ? Number(data.points) : 0) };
+            let docId = null;
+            if (db && fns.addDoc && fns.collection) {
+              const docRef = await fns.addDoc(fns.collection(db, 'pointsRules'), payload);
+              docId = docRef.id;
+            }
+            if (!docId) throw new Error('新增失敗');
+            const rowHtml = `<tr data-id="${docId}"><td>${payload.reason}</td><td>${payload.handle}</td><td>${payload.status}</td><td>${payload.points}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td></tr>`;
+            appState.pointsRules.unshift({ id: docId, ...payload });
+            if (tbody) tbody.insertAdjacentHTML('afterbegin', rowHtml);
+            return true;
+          } catch (e) {
+            alert(`新增失敗：${e?.message || e}`);
+            return false;
+          }
+        }
+      });
+    });
+  }
   (async () => {
     try {
       await ensureFirebase();
@@ -5761,18 +5962,20 @@ function renderSettingsRules() {
       }).join('');
     }
   })();
-  if (!table) return;
-  table.addEventListener('click', async (e) => {
-    const t = e.target;
-    if (!(t instanceof HTMLElement)) return;
-    const act = t.dataset.act || '';
-    if (!act) return;
-    const tr = t.closest('tr');
-    const idv = tr?.getAttribute('data-id') || '';
-    const idx = appState.pointsRules.findIndex((x) => x.id === idv);
-    if (idx < 0) return;
-    const r = appState.pointsRules[idx];
+    if (!table) return;
+    table.addEventListener('click', async (e) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement)) return;
+      const act = t.dataset.act || '';
+      if (!act) return;
+      if (!isAdmin && act !== 'edit' && act !== 'del') return;
+      const tr = t.closest('tr');
+      const idv = tr?.getAttribute('data-id') || '';
+      const idx = appState.pointsRules.findIndex((x) => x.id === idv);
+      if (idx < 0) return;
+      const r = appState.pointsRules[idx];
     if (act === 'edit') {
+      if (!isAdmin) { alert('權限不足：只有系統管理員可以編輯規則。'); return; }
       openModal({
         title: '編輯計點規則',
         fields: [
@@ -5799,6 +6002,7 @@ function renderSettingsRules() {
         }
       });
     } else if (act === 'del') {
+      if (!isAdmin) { alert('權限不足：只有系統管理員可以刪除規則。'); return; }
       const ok = await confirmAction({ title: '確認刪除', text: '確定要刪除這筆規則嗎？', confirmText: '刪除' });
       if (!ok) return;
       try {
