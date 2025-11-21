@@ -290,15 +290,12 @@ button[disabled] { cursor: not-allowed; }
 /* 通用狀態標籤顏色（列表卡片等處） */
 .status-label.work { color: #0f9d58; }
 .status-flag.good { background: #0f9d58; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; line-height: 1.4; }
-.status-label.off { color: #d93025; }
+.status-label.off { color: #FF0000; }
 .status-label.out { color: #1e88e5; }
 .status-label.arrive { color: #1e88e5; }
 .status-label.leave { color: #1e88e5; }
-.status-label.return { color: #0b8043; }
-.status-label.bad { color: #CC0000; }
-.status-label.leave-request { color: #f57c00; }
-/* 預設狀態標籤不指定顏色，依父層繼承 */
-.status-label { color: inherit; }
+.status-label.return { color: #26a69a; }
+.status-label.bad { color: #d93025; }
 /* 首頁狀態列背景色（依狀態） */
 body.status-work .home-layout .home-mid-stack .row-g { background: #e6f4ea; }
 body.status-off .home-layout .home-mid-stack .row-g { background: #fce8e6; }
