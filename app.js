@@ -7,10 +7,10 @@ window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
   apiKey: "AIzaSyDdetnrACoNTSV3ZqFBPOSfnZzRtmk5fk8",
   authDomain: "nw-checkin.firebaseapp.com",
   projectId: "nw-checkin",
-  storageBucket: "nw-checkin.appspot.com",
+  storageBucket: "nw-checkin.firebasestorage.app",
   messagingSenderId: "520938520545",
   appId: "1:520938520545:web:fb32a42eb1504aab041ca0",
-  measurementId: "G-G6M6NGBC03",
+  measurementId: "G-G6M6NGBC03"
 };
 
 // Google Maps API Key（來自使用者提供）
@@ -191,8 +191,9 @@ function renderHomeStatusText(str) {
     const status = parts.pop();
     const before = parts.join(" ");
     const flagCls = flag === "異常" ? "bad" : (flag === "正常" ? "good" : "");
+    const baseStatus = String(status).split('-')[0];
     const statusCls = (() => {
-      switch (status) {
+      switch (baseStatus) {
         case "上班": return "work";
         case "下班": return "off";
         case "外出": return "out";
@@ -205,8 +206,9 @@ function renderHomeStatusText(str) {
     const m = before.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:\s+(.+))?$/);
     const dateText = m ? m[1] : before;
     const locText = m ? (m[2] || "") : "";
+    const nameText = (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || '';
     el.style.textAlign = "center";
-    el.innerHTML = `<div>${dateText}</div><div>${locText ? `${locText} ` : ""}<span class="status-label ${statusCls}">${status}</span> <span class="status-flag ${flagCls}">${flag}</span></div>`;
+    el.innerHTML = `<div>${dateText}${nameText ? ` ${nameText}` : ''}</div><div>${nameText ? `${nameText} ` : ''}${locText ? `<span class="status-label ${statusCls}">${locText}</span> ` : ""}<span class="status-label ${statusCls}">${status}</span> <span class="status-flag ${flagCls}">${flag}</span></div>`;
   } else {
     el.textContent = s;
   }
@@ -285,6 +287,7 @@ attachPressInteractions(document.getElementById("emailSignIn"));
 attachPressInteractions(document.getElementById("applyAccountBtn"));
 attachPressInteractions(togglePasswordBtn);
 attachPressInteractions(btnLeaveRequest);
+try { if (btnLeaveRequest) btnLeaveRequest.className = 'btn btn-grey'; } catch {}
 attachPressInteractions(btnMakeup);
 
 // 顯示/隱藏密碼
@@ -317,6 +320,7 @@ if (togglePasswordBtn) {
   communities: [],
   accounts: [],
   pendingAccounts: [],
+  pointsRules: [],
   currentUserId: null,
   currentUserRole: null,
   currentUserEmail: null,
@@ -473,6 +477,9 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
       input.type = f.type || "text";
       input.placeholder = f.placeholder || "";
       input.setAttribute("lang", "zh-Hant");
+      if (f.step != null) input.step = String(f.step);
+      if (f.min != null) input.min = String(f.min);
+      if (f.max != null) input.max = String(f.max);
       if (f.placeholder) input.setAttribute("title", f.placeholder);
       if (initial && initial[f.key] != null && f.type !== "file") input.value = initial[f.key];
       if (f.readonly) input.disabled = true;
@@ -483,6 +490,8 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
     // 檔案欄位預覽：初始值與即時選取預覽
     if (f.type === "file") {
       input.setAttribute("title", "選擇檔案");
+      if (f.accept) input.setAttribute("accept", f.accept);
+      if (f.capture) input.setAttribute("capture", f.capture);
       let preview = null;
       if (initial && initial[f.key]) {
         preview = document.createElement("img");
@@ -524,55 +533,57 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
     inputs.push(input);
   });
 
-  const footer = document.createElement("div");
-  footer.className = "modal-footer";
-  footer.style.display = "grid";
-  footer.style.gridTemplateColumns = "1fr";
-  footer.style.gap = "8px";
-  const btnSubmit = document.createElement("button");
-  btnSubmit.className = "btn btn-darkgrey";
-  btnSubmit.textContent = submitText;
-  btnSubmit.style.display = "";
-  btnSubmit.style.alignItems = "";
-  btnSubmit.style.justifyContent = "";
-  btnSubmit.style.padding = "";
-  btnSubmit.style.width = "";
-  attachPressInteractions(btnSubmit);
-  btnSubmit.addEventListener("click", async () => {
-    const data = {};
-    for (const el of inputs) {
-      const key = el.dataset.key;
-      if (el.tagName === "DIV" && el.dataset.multikey) {
-        const vals = Array.from(el.querySelectorAll("input[type=checkbox]:checked:not([data-select-all='true'])")).map((c) => c.value);
-        data[key] = vals;
-      } else if (el.type === "file") {
-        const file = el.files?.[0];
-        if (file) {
-          data[key] = await fileToDataUrl(file);
-          data[`${key}Name`] = file.name;
+  let footer = null;
+  if (submitText) {
+    footer = document.createElement("div");
+    footer.className = "modal-footer";
+    footer.style.display = "grid";
+    footer.style.gridTemplateColumns = "1fr";
+    footer.style.gap = "8px";
+    const btnSubmit = document.createElement("button");
+    btnSubmit.className = "btn btn-darkgrey";
+    btnSubmit.textContent = submitText;
+    btnSubmit.style.display = "";
+    btnSubmit.style.alignItems = "";
+    btnSubmit.style.justifyContent = "";
+    btnSubmit.style.padding = "";
+    btnSubmit.style.width = "";
+    attachPressInteractions(btnSubmit);
+    btnSubmit.addEventListener("click", async () => {
+      const data = {};
+      for (const el of inputs) {
+        const key = el.dataset.key;
+        if (el.tagName === "DIV" && el.dataset.multikey) {
+          const vals = Array.from(el.querySelectorAll("input[type=checkbox]:checked:not([data-select-all='true'])")).map((c) => c.value);
+          data[key] = vals;
+        } else if (el.type === "file") {
+          const file = el.files?.[0];
+          if (file) {
+            data[key] = await fileToDataUrl(file);
+            data[`${key}Name`] = file.name;
+          } else {
+            data[key] = initial[key] ?? null;
+          }
+        } else if (el.type === "number") {
+          data[key] = el.value ? Number(el.value) : null;
         } else {
-          data[key] = initial[key] ?? null;
+          data[key] = el.value;
         }
-      } else if (el.type === "number") {
-        data[key] = el.value ? Number(el.value) : null;
-      } else {
-        data[key] = el.value;
       }
-    }
-    const ok = await onSubmit?.(data);
-    // 若 onSubmit 明確回傳 false，視為失敗不關閉視窗；成功則關閉並回到目前子分頁列表
-    if (ok !== false) {
-      closeModal();
-      if (refreshOnSubmit && activeMainTab === "settings" && activeSubTab) {
-        renderSettingsContent(activeSubTab);
+      const ok = await onSubmit?.(data);
+      if (ok !== false) {
+        closeModal();
+        if (refreshOnSubmit && activeMainTab === "settings" && activeSubTab) {
+          renderSettingsContent(activeSubTab);
+        }
       }
-    }
-  });
-  footer.appendChild(btnSubmit);
+    });
+    footer.appendChild(btnSubmit);
+  }
 
   modal.appendChild(header);
   modal.appendChild(body);
-  modal.appendChild(footer);
+  if (footer) modal.appendChild(footer);
   modalRoot.appendChild(modal);
 
   // 允許外部在渲染完成後插入額外 UI 或事件（例如地圖編輯按鈕）
@@ -644,6 +655,39 @@ async function flushPendingCheckins() {
     for (const p of arr) {
       try {
         await withRetry(() => fns.addDoc(fns.collection(db, "checkins"), p));
+      } catch {
+        failures.push(p);
+      }
+    }
+    if (failures.length) {
+      localStorage.setItem(key, JSON.stringify(failures));
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch {}
+}
+
+function enqueuePendingLeave(payload) {
+  try {
+    const key = "pendingLeaves";
+    const v = localStorage.getItem(key);
+    const arr = v ? JSON.parse(v) : [];
+    arr.push(payload);
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch {}
+}
+async function flushPendingLeaves() {
+  try {
+    await ensureFirebase();
+    if (!db || !fns.addDoc || !fns.collection) return;
+    const key = "pendingLeaves";
+    const v = localStorage.getItem(key);
+    const arr = v ? JSON.parse(v) : [];
+    if (!Array.isArray(arr) || !arr.length) return;
+    const failures = [];
+    for (const p of arr) {
+      try {
+        await withRetry(() => fns.addDoc(fns.collection(db, "leaveRequests"), p));
       } catch {
         failures.push(p);
       }
@@ -1853,6 +1897,8 @@ function renderSettingsContent(label) {
     renderSettingsCommunities();
   } else if (label === "帳號") {
     renderSettingsAccounts();
+  } else if (label === "規則") {
+    renderSettingsRules();
   } else {
     settingsContent.innerHTML = "";
   }
@@ -3208,8 +3254,9 @@ let ensureFirebasePromise = null;
       appState.currentUserEmail = user.email || null;
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
-      // 登入後嘗試同步離線期間累積的打卡紀錄
+      // 登入後嘗試同步離線期間累積的打卡與請假紀錄
       try { await flushPendingCheckins(); } catch {}
+      try { await flushPendingLeaves(); } catch {}
       try { await flushPendingAccounts(); } catch {}
 
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
@@ -3326,90 +3373,72 @@ let ensureFirebasePromise = null;
 
   // 請假與補卡
   btnLeaveRequest?.addEventListener('click', () => {
-    openModal({
-      title: '請假申請',
-      fields: [
-        { key: 'reason', label: '事由', type: 'select', options: [
+              openModal({
+                title: '新增請假',
+                fields: [
+        { key: 'type', label: '類型', type: 'select', options: [
           { value: '病假', label: '病假' },
           { value: '事假', label: '事假' },
+          { value: '特休', label: '特休' },
+          { value: '公假', label: '公假' },
           { value: '其他', label: '其他' },
         ] },
-        { key: 'reasonOther', label: '自定義事由', type: 'text' },
-        { key: 'startDatetime', label: '請假 日期時間 起', type: 'datetime-local', placeholder: '請選擇起始日期時間' },
-        { key: 'endDatetime', label: '請假 日期時間 止', type: 'datetime-local', placeholder: '請選擇結束日期時間' },
-        { key: 'totalHours', label: '總計 小時', type: 'number', readonly: true },
-        { key: 'note', label: '備註', type: 'text' },
-        { key: 'attachment', label: '上傳文件', type: 'file' },
+        { key: 'startAt', label: '開始', type: 'datetime-local', step: 60 },
+        { key: 'endAt', label: '結束', type: 'datetime-local', step: 60 },
+        { key: 'reason', label: '原因', type: 'text' },
+        { key: 'attachment', label: '上傳照片', type: 'file', accept: 'image/png,image/jpeg' },
       ],
-      initial: { reason: '事假', reasonOther: '', startDatetime: '', endDatetime: '', totalHours: 0, note: '' },
-      submitText: '送出',
+      initial: { type: '病假' },
+      submitText: '送出申請',
       refreshOnSubmit: false,
       onSubmit: async (data) => {
         try {
           await ensureFirebase();
-          const user = auth?.currentUser || null;
-          const reason = String(data.reason || '') === '其他' ? String(data.reasonOther || '') : String(data.reason || '');
+          const u = auth?.currentUser || null;
           const payload = {
-            uid: user?.uid || null,
-            name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, ''),
-            reason,
-            startDatetime: String(data.startDatetime || ''),
-            endDatetime: String(data.endDatetime || ''),
-            totalHours: typeof data.totalHours === 'number' ? data.totalHours : (Number(data.totalHours || 0)),
-            datetime: String(data.startDatetime || ''),
-            note: String(data.note || ''),
-            attachmentData: window.__leaveAttachmentData || '',
+            uid: u?.uid || null,
+            name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || (u?.email || '使用者'),
+            type: String(data.type || ''),
+            startAt: String(data.startAt || ''),
+            endAt: String(data.endAt || ''),
+            reason: String(data.reason || ''),
+            attachmentData: String(data.attachment || window.__leaveAttachmentData || ''),
+            status: '送審',
             createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
           };
+          let saved = false;
           if (db && fns.addDoc && fns.collection) {
-            await fns.addDoc(fns.collection(db, 'leaveRequests'), payload);
+            try { await fns.addDoc(fns.collection(db, 'leaveRequests'), payload); saved = true; } catch {}
+          }
+          if (!saved) {
+            const p2 = { ...payload };
+            if (typeof p2.createdAt !== 'string') p2.createdAt = new Date().toISOString();
+            enqueuePendingLeave(p2);
           }
           alert('已送出請假申請');
           return true;
         } catch (e) {
-          alert(`送出失敗：${e?.message || e}`);
+          const msg = e?.message || e;
+          alert(typeof msg === 'string' ? `送出失敗：${msg}` : '送出失敗');
           return false;
         }
       },
       afterRender: ({ body }) => {
-        const sel = body.querySelector('[data-key="reason"]');
-        const other = body.querySelector('[data-key="reasonOther"]');
-        if (sel && other) {
-          const sync = () => { const v = sel.value; other.parentElement.style.display = (v === '其他') ? '' : 'none'; };
-          sync(); sel.addEventListener('change', sync);
-        }
-        const startEl = body.querySelector('[data-key="startDatetime"]');
-        const endEl = body.querySelector('[data-key="endDatetime"]');
-        const hoursEl = body.querySelector('[data-key="totalHours"]');
-        const calc = () => {
-          try {
-            const sv = startEl?.value || '';
-            const ev = endEl?.value || '';
-            if (!sv || !ev) { if (hoursEl) hoursEl.value = ''; return; }
-            const s = new Date(sv);
-            const e = new Date(ev);
-            let h = (e.getTime() - s.getTime()) / 3600000;
-            if (!isFinite(h)) h = 0;
-            if (h < 0) h = 0;
-            const v = Math.round(h * 100) / 100;
-            if (hoursEl) hoursEl.value = String(v);
-          } catch { if (hoursEl) hoursEl.value = ''; }
-        };
-        if (startEl) startEl.addEventListener('change', calc);
-        if (endEl) endEl.addEventListener('change', calc);
-        calc();
-        const fileInput = body.querySelector('[data-key="attachment"]');
-        if (fileInput) {
-          fileInput.addEventListener('change', () => {
-            try {
-              const f = fileInput.files?.[0];
-              if (!f) { window.__leaveAttachmentData = ''; return; }
-              const reader = new FileReader();
-              reader.onload = () => { window.__leaveAttachmentData = String(reader.result || ''); };
-              reader.readAsDataURL(f);
-            } catch { window.__leaveAttachmentData = ''; }
-          });
-        }
+        try {
+          const fileInput = body.querySelector('[data-key="attachment"]');
+          if (fileInput) {
+            fileInput.addEventListener('change', () => {
+              try {
+                const f = fileInput.files?.[0];
+                if (!f) { window.__leaveAttachmentData = ''; return; }
+                const reader = new FileReader();
+                reader.onload = () => { window.__leaveAttachmentData = String(reader.result || ''); };
+                reader.readAsDataURL(f);
+              } catch { window.__leaveAttachmentData = ''; }
+            });
+            // 移除拍照功能，僅保留檔案上傳
+          }
+        } catch {}
       }
     });
   });
@@ -4468,7 +4497,18 @@ function setHomeStatus(key, label) {
   document.body.classList.add(`status-${key}`);
   if (homeStatusEl) {
     const t = label || "";
-    const cls = t === "上班" ? "work" : "";
+    const base = String(t).split('-')[0];
+    const cls = (() => {
+      switch (base) {
+        case "上班": return "work";
+        case "下班": return "off";
+        case "外出": return "out";
+        case "抵達": return "arrive";
+        case "離開": return "leave";
+        case "返回": return "return";
+        default: return "";
+      }
+    })();
     homeStatusEl.innerHTML = `<span class="status-label ${cls}">${t}</span>`;
   }
 }
@@ -4897,10 +4937,11 @@ try {
         fRow.textContent = '';
         fRow.classList.add('hidden');
       }
-      setHomeStatus(statusKey, statusLabel);
-      const summary = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
+      const reasonText = ((statusKey === 'out' || statusKey === 'arrive' || statusKey === 'leave') && selectedLocation && selectedLocation.reason) ? `-${selectedLocation.reason}` : '';
+      setHomeStatus(statusKey, `${statusLabel}${reasonText}`);
+      const summary = `${dateStr} ${selectedLocation.name} ${statusLabel}${reasonText} ${inRadius ? '正常' : '異常'}`;
       if (homeStatusEl) renderHomeStatusText(summary);
-      try { const u = auth?.currentUser; if (u?.uid) setLastCheckin(u.uid, { summary, key: statusKey, label: statusLabel }); } catch {}
+      try { const u = auth?.currentUser; if (u?.uid) setLastCheckin(u.uid, { summary, key: statusKey, label: `${statusLabel}${reasonText}` }); } catch {}
   try { alert('您已完成打卡'); const u2 = new SpeechSynthesisUtterance('您已完成打卡'); u2.lang = 'zh-TW'; window.speechSynthesis?.speak(u2); } catch {}
   try { setActiveTab('home'); } catch {}
   try { document.querySelectorAll('.modal').forEach((m) => m.remove()); } catch {}
@@ -4953,12 +4994,15 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
         const tzNow = nowInTZ('Asia/Taipei');
         const list = [];
         snap.forEach((doc) => {
-          const data = doc.data();
-          let created = data.createdAt;
-          let dt = null;
-          if (created && typeof created.toDate === 'function') dt = created.toDate(); else if (typeof created === 'string') dt = new Date(created);
-          if (!dt) return;
-          list.push({ id: doc.id, ...data, dt });
+          try {
+            const data = doc.data() || {};
+            const created = data.createdAt;
+            let dt = null;
+            if (created && typeof created.toDate === 'function') dt = created.toDate();
+            else if (typeof created === 'string') dt = new Date(created);
+            if (!(dt instanceof Date) || isNaN(dt)) return;
+            list.push({ id: doc.id, ...data, dt });
+          } catch {}
         });
           // 預先取得裝置型號對照（避免顯示未知裝置）
           const deviceIds = Array.from(new Set(list.map((r) => r.deviceId).filter((x) => !!x)));
@@ -4983,9 +5027,9 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             </div>
             <div id="recordList"></div>
           `;
-          const dateInput = container.querySelector('#recordDate');
-          const listRoot = container.querySelector('#recordList');
-          if (!listRoot || !dateInput) return;
+            const dateInput = container.querySelector('#recordDate');
+            const listRoot = container.querySelector('#recordList');
+            if (!listRoot || !dateInput) { isLoadingCheckins = false; return; }
           dateInput.value = todayYmd;
           function renderForDate(ymdStr) {
             const parts = String(ymdStr || '').split('-');
@@ -5005,9 +5049,10 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               card.style.gridTemplateColumns = '1fr';
               card.style.gap = '8px';
               const status = document.createElement('div');
-              const st = r.status || '';
+              const stRaw = r.status || '';
+              const baseSt = String(stRaw).split('-')[0];
               const stCls = (() => {
-                switch (st) {
+                switch (baseSt) {
                   case '上班': return 'work';
                   case '下班': return 'off';
                   case '外出': return 'out';
@@ -5019,14 +5064,21 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               })();
               const place = r.locationName || '未知地點';
               const flagHtml = r.inRadius === true ? ' <span class="status-flag good">正常</span>' : ' <span class="status-flag bad">異常</span>';
-              status.innerHTML = `打卡地點：<span class="status-label ${stCls}">${place}</span> 狀態：<span class="status-label ${stCls}">${st}</span>${flagHtml}`;
+              const stDisplay = (() => {
+                const reason = r.reason || '';
+                if ((baseSt === '外出' || baseSt === '抵達' || baseSt === '離開') && reason) return `${baseSt}-${reason}`;
+                return stRaw || baseSt;
+              })();
+              const nameText = r.name || '使用者';
+              status.innerHTML = `${nameText} 打卡地點：<span class="status-label ${stCls}">${place}</span> 狀態：<span class="status-label ${stCls}">${stDisplay}</span>${flagHtml}`;
               const dtStr = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
               const when = document.createElement('div');
               when.textContent = `時間：${dtStr}`;
-              const dev = document.createElement('div');
-              const fallbackShort = (r.deviceId ? `裝置-${String(r.deviceId).slice(-6)}` : '裝置');
+              const devCode = r.deviceId ? String(r.deviceId) : '';
+              const fallbackShort = (devCode ? `裝置-${devCode.slice(-6)}` : '裝置');
               const modelText = r.deviceModel || deviceModelsMap.get(r.deviceId) || getDeviceModelCache(r.deviceId) || fallbackShort;
-              dev.textContent = `裝置型號：${modelText}`;
+              const deviceLabel = devCode || modelText;
+              status.innerHTML += ` <span class="muted">裝置：${deviceLabel}</span>`;
               card.appendChild(status);
               card.appendChild(when);
               const mapBtn = document.createElement('button');
@@ -5034,6 +5086,8 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               mapBtn.type = 'button';
               mapBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;"><path d="M12 2c-3.866 0-7 3.134-7 7 0 5.25 7 13 7 13s7-7.75 7-13c0-3.866-3.134-7-7-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="9" r="2" stroke="currentColor" stroke-width="2"/></svg>地圖`;
               mapBtn.style.borderRadius = '0';
+              mapBtn.style.padding = '4px 8px';
+              mapBtn.style.minHeight = '30px';
               attachPressInteractions(mapBtn);
               mapBtn.disabled = !(typeof r.lat === 'number' && typeof r.lng === 'number');
               mapBtn.title = mapBtn.disabled ? '座標未知' : '';
@@ -5041,21 +5095,29 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 if (mapBtn.disabled) return;
                 const lat = Number(r.lat).toFixed(6);
                 const lon = Number(r.lng).toFixed(6);
-                const size = '640x360';
-                const zoom = 16;
-                const marker = `markers=color:red|${lat},${lon}`;
-                const src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=${zoom}&size=${size}&scale=2&maptype=roadmap&${marker}&key=${GOOGLE_MAPS_API_KEY}`;
                 openModal({
                   title: '定位地圖',
                   fields: [],
                   submitText: '關閉',
                   refreshOnSubmit: false,
                   onSubmit: async () => true,
-                  afterRender: ({ body }) => {
-                    const img = document.createElement('img');
-                    img.src = src; img.alt = '定位地圖'; img.style.width = '100%'; img.style.borderRadius = '8px';
-                    const txt = document.createElement('div'); txt.textContent = `座標：${lat}, ${lon}`; txt.className = 'muted'; txt.style.marginTop = '8px';
-                    body.appendChild(img); body.appendChild(txt);
+                  afterRender: async ({ body }) => {
+                    try {
+                      const maps = await ensureGoogleMaps();
+                      const box = document.createElement('div');
+                      box.style.width = '100%';
+                      box.style.height = '65vh';
+                      box.style.borderRadius = '8px';
+                      body.appendChild(box);
+                      const center = { lat: parseFloat(lat), lng: parseFloat(lon) };
+                      const map = new maps.Map(box, { center, zoom: 18, gestureHandling: 'greedy' });
+                      new maps.Marker({ position: center, map, draggable: false, title: '目前位置' });
+                      const txt = document.createElement('div'); txt.textContent = `座標：${lat}, ${lon}`; txt.className = 'muted'; txt.style.marginTop = '8px';
+                      body.appendChild(txt);
+                    } catch {
+                      const txt = document.createElement('div'); txt.textContent = `座標：${lat}, ${lon}`; txt.className = 'muted'; txt.style.marginTop = '8px';
+                      body.appendChild(txt);
+                    }
                   }
                 });
               });
@@ -5065,6 +5127,8 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               photoBtn.type = 'button';
               photoBtn.innerHTML = `<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" style=\"margin-right:6px;\"><rect x=\"4\" y=\"7\" width=\"16\" height=\"12\" rx=\"2\" stroke=\"currentColor\" stroke-width=\"2\" /><path d=\"M9 7l1.5-2h3L15 7\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" /><circle cx=\"12\" cy=\"13\" r=\"3.5\" stroke=\"currentColor\" stroke-width=\"2\" /></svg>照片`;
               photoBtn.style.borderRadius = '0';
+              photoBtn.style.padding = '4px 8px';
+              photoBtn.style.minHeight = '30px';
               attachPressInteractions(photoBtn);
               photoBtn.disabled = !r.photoData;
               photoBtn.title = photoBtn.disabled ? '無照片' : '';
@@ -5078,7 +5142,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                   onSubmit: async () => true,
                   afterRender: ({ body }) => {
                     const img = document.createElement('img');
-                    img.src = r.photoData; img.alt = '打卡照片'; img.style.width = '100%'; img.style.borderRadius = '8px';
+                    img.src = r.photoData; img.alt = '打卡照片'; img.style.width = '100%'; img.style.borderRadius = '8px'; img.style.aspectRatio = '1'; img.style.objectFit = 'cover';
                     body.appendChild(img);
                   }
                 });
@@ -5089,6 +5153,8 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               modifyBtn.type = 'button';
               modifyBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:6px;"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M14 4l6 6-9 9H5v-6l9-9Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>申請修改`;
               modifyBtn.style.borderRadius = '0';
+              modifyBtn.style.padding = '4px 8px';
+              modifyBtn.style.minHeight = '30px';
               attachPressInteractions(modifyBtn);
               modifyBtn.addEventListener('click', () => {
                 const dtStr2 = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
@@ -5143,14 +5209,13 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               });
 
               const actions = document.createElement('div');
-              actions.className = 'record-actions';
-              actions.appendChild(mapBtn);
-              actions.appendChild(photoBtn);
-              actions.appendChild(modifyBtn);
-              card.appendChild(actions);
-              card.appendChild(dev);
-            listRoot.appendChild(card);
-          });
+                actions.className = 'record-actions';
+                actions.appendChild(mapBtn);
+                actions.appendChild(photoBtn);
+                actions.appendChild(modifyBtn);
+                card.appendChild(actions);
+              listRoot.appendChild(card);
+            });
         }
           renderForDate(todayYmd);
           dateInput.addEventListener('change', () => renderForDate(dateInput.value));
@@ -5161,6 +5226,375 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
           if (s.includes('ERR_ABORTED') || s.includes('documents:runQuery') || s.includes('documents:batchGet')) { isLoadingCheckins = false; return; }
           container.textContent = typeof msg === 'string' ? `載入失敗：${msg}` : "載入失敗：可能為權限或索引設定問題";
           isLoadingCheckins = false;
+        }
+      })();
+      return;
+    }
+    if (label === "請假") {
+      (async () => {
+        try {
+          await ensureFirebase();
+          const user = auth?.currentUser || null;
+          if (!user) { container.textContent = "請先登入"; return; }
+          const tzNow = nowInTZ('Asia/Taipei');
+          const ref = fns.collection(db, "leaveRequests");
+          const q = fns.query(ref, fns.where("uid", "==", user.uid));
+          const snap = await fns.getDocs(q);
+          const list = [];
+          snap.forEach((doc) => {
+            try {
+              const data = doc.data() || {};
+              const created = data.createdAt;
+              let dt = null;
+              if (created && typeof created.toDate === 'function') dt = created.toDate(); else if (typeof created === 'string') dt = new Date(created);
+              if (!(dt instanceof Date) || isNaN(dt)) dt = new Date();
+              const s = data.startAt;
+              const e = data.endAt;
+              const sdt = typeof s === 'string' ? new Date(s) : (s && typeof s.toDate === 'function' ? s.toDate() : null);
+              const edt = typeof e === 'string' ? new Date(e) : (e && typeof e.toDate === 'function' ? e.toDate() : null);
+              list.push({ id: doc.id, ...data, dt, sdt, edt });
+            } catch {}
+          });
+          try {
+            const key = 'pendingLeaves';
+            const v = localStorage.getItem(key);
+            const arr = v ? JSON.parse(v) : [];
+            const u = auth?.currentUser || null;
+            const mine = Array.isArray(arr) ? arr.filter((x) => x && x.uid && u && x.uid === u.uid) : [];
+            mine.forEach((data) => {
+              const created = data.createdAt;
+              const dt = typeof created === 'string' ? new Date(created) : (created && typeof created.toDate === 'function' ? created.toDate() : new Date());
+              const s = data.startAt;
+              const e = data.endAt;
+              const sdt = typeof s === 'string' ? new Date(s) : (s && typeof s.toDate === 'function' ? s.toDate() : null);
+              const edt = typeof e === 'string' ? new Date(e) : (e && typeof e.toDate === 'function' ? e.toDate() : null);
+              list.push({ id: `local-${Math.random().toString(36).slice(2)}`, ...data, dt, sdt, edt });
+            });
+          } catch {}
+          const y = tzNow.getFullYear();
+          const m = tzNow.getMonth() + 1;
+          const todayYm = `${y}-${String(m).padStart(2,'0')}`;
+          container.innerHTML = `
+            <div class="roster-datebar">
+              <label for="leaveMonth">月份：</label>
+              <input id="leaveMonth" type="month" />
+              <button id="btnAddLeave" class="btn btn-orange" type="button">新增請假</button>
+            </div>
+            <div id="leaveList"></div>
+          `;
+          const monthInput = container.querySelector('#leaveMonth');
+          const addBtn = container.querySelector('#btnAddLeave');
+          const listRoot = container.querySelector('#leaveList');
+          if (!monthInput || !listRoot || !addBtn) return;
+          monthInput.value = todayYm;
+          attachPressInteractions(addBtn);
+          const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          const formatDT = (d) => `${formatDate(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          function renderForMonth(ymStr) {
+            const parts = String(ymStr || '').split('-');
+            if (parts.length !== 2) return;
+            const y = Number(parts[0]);
+            const m = Number(parts[1]) - 1;
+            const start = new Date(y, m, 1);
+            const end = new Date(y, m + 1, 1);
+            const monthList = list.filter((r) => {
+              const base = r.sdt instanceof Date && !isNaN(r.sdt) ? r.sdt : r.dt;
+              return base >= start && base < end;
+            }).sort((a, b) => b.dt - a.dt);
+            listRoot.innerHTML = '';
+            if (!monthList.length) { listRoot.textContent = '該月無請假項目'; return; }
+            monthList.forEach((r) => {
+              const card = document.createElement('div');
+              card.className = 'record-card';
+              card.style.display = 'grid';
+              card.style.gridTemplateColumns = '1fr';
+              card.style.gap = '8px';
+              const status = document.createElement('div');
+              const nameText = r.name || (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || '使用者';
+              const typeText = r.type || '請假';
+              const sStr = r.sdt instanceof Date && !isNaN(r.sdt) ? formatDT(r.sdt) : '未設定';
+              const eStr = r.edt instanceof Date && !isNaN(r.edt) ? formatDT(r.edt) : '未設定';
+              const reason = r.reason || '';
+              const st = r.status || '送審';
+              status.innerHTML = `${nameText} 類型：<span class="status-label work">${typeText}</span> 時段：<span class="status-label arrive">${sStr}</span> → <span class="status-label leave">${eStr}</span> 原因：<span class="status-label return">${reason || '無'}</span> 狀態：<span class="status-label ${st==='核准'?'work':'out'}">${st}</span>`;
+              const when = document.createElement('div');
+              const dtStr = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')} ${String(r.dt.getHours()).padStart(2,'0')}:${String(r.dt.getMinutes()).padStart(2,'0')}:${String(r.dt.getSeconds()).padStart(2,'0')}`;
+              when.textContent = `建立：${dtStr}`;
+              const btnEdit = document.createElement('button');
+              btnEdit.className = 'btn btn-blue';
+              btnEdit.type = 'button';
+              btnEdit.textContent = '編輯';
+              btnEdit.style.borderRadius = '0';
+              btnEdit.style.padding = '4px 8px';
+              btnEdit.style.minHeight = '30px';
+              attachPressInteractions(btnEdit);
+              btnEdit.disabled = (st === '核准');
+              const btnDel = document.createElement('button');
+              btnDel.className = 'btn btn-orange';
+              btnDel.type = 'button';
+              btnDel.textContent = '刪除';
+              btnDel.style.borderRadius = '0';
+              btnDel.style.padding = '4px 8px';
+              btnDel.style.minHeight = '30px';
+              attachPressInteractions(btnDel);
+              btnDel.disabled = (st === '核准');
+              btnEdit.title = btnEdit.disabled ? '已核准無法編輯' : '';
+              btnDel.title = btnDel.disabled ? '已核准無法刪除' : '';
+              btnEdit.addEventListener('click', () => {
+                if (btnEdit.disabled) return;
+                const initS = r.sdt instanceof Date && !isNaN(r.sdt) ? `${r.sdt.getFullYear()}-${String(r.sdt.getMonth()+1).padStart(2,'0')}-${String(r.sdt.getDate()).padStart(2,'0')}T${String(r.sdt.getHours()).padStart(2,'0')}:${String(r.sdt.getMinutes()).padStart(2,'0')}` : '';
+                const initE = r.edt instanceof Date && !isNaN(r.edt) ? `${r.edt.getFullYear()}-${String(r.edt.getMonth()+1).padStart(2,'0')}-${String(r.edt.getDate()).padStart(2,'0')}T${String(r.edt.getHours()).padStart(2,'0')}:${String(r.edt.getMinutes()).padStart(2,'0')}` : '';
+                openModal({
+                  title: '編輯請假',
+                  fields: [
+                    { key: 'type', label: '類型', type: 'select', options: [
+                      { value: '事假', label: '事假' },
+                      { value: '病假', label: '病假' },
+                      { value: '特休', label: '特休' },
+                      { value: '公假', label: '公假' },
+                      { value: '其他', label: '其他' },
+                    ] },
+                    { key: 'startAt', label: '開始', type: 'datetime-local', step: 60 },
+                    { key: 'endAt', label: '結束', type: 'datetime-local', step: 60 },
+                    { key: 'reason', label: '原因', type: 'text' },
+                    { key: 'attachment', label: '上傳照片', type: 'file', accept: 'image/png,image/jpeg' },
+                    { key: 'deletePhoto', label: '刪除照片', type: 'checkbox' },
+                  ],
+                  initial: { type: r.type || '事假', startAt: initS, endAt: initE, reason: r.reason || '' },
+                  submitText: '儲存',
+                  refreshOnSubmit: false,
+                  onSubmit: async (data) => {
+                    try {
+                      await ensureFirebase();
+                      const payload = {
+                        type: String(data.type || ''),
+                        startAt: String(data.startAt || ''),
+                        endAt: String(data.endAt || ''),
+                        reason: String(data.reason || ''),
+                        updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+                      };
+                      if (data.deletePhoto) {
+                        payload.attachmentData = '';
+                      } else {
+                        const incoming = String(data.attachment || window.__leaveAttachmentData || '');
+                        if (incoming) {
+                          payload.attachmentData = incoming;
+                        } else if (typeof r.attachmentData === 'string') {
+                          payload.attachmentData = r.attachmentData;
+                        }
+                      }
+                      if (db && fns.updateDoc && fns.doc) {
+                        await fns.updateDoc(fns.doc(db, 'leaveRequests', r.id), payload);
+                      }
+                      try {
+                        const idx = list.findIndex((x) => x.id === r.id);
+                        if (idx >= 0) {
+                          const sdt = payload.startAt ? new Date(payload.startAt) : null;
+                          const edt = payload.endAt ? new Date(payload.endAt) : null;
+                          list[idx] = {
+                            ...list[idx],
+                            ...payload,
+                            sdt: (sdt instanceof Date && !isNaN(sdt)) ? sdt : list[idx].sdt,
+                            edt: (edt instanceof Date && !isNaN(edt)) ? edt : list[idx].edt,
+                          };
+                        }
+                      } catch {}
+                      renderForMonth(monthInput.value);
+                      return true;
+                    } catch (e) {
+                      alert(`更新失敗：${e?.message || e}`);
+                      return false;
+                    }
+                  },
+                  afterRender: ({ body }) => {
+                    try {
+                      if (r.attachmentData) {
+                        const img = document.createElement('img');
+                        img.src = r.attachmentData;
+                        img.alt = '目前照片';
+                        img.style.width = '100%';
+                        img.style.borderRadius = '8px';
+                        img.style.aspectRatio = '1';
+                        img.style.objectFit = 'cover';
+                        attachPressInteractions(img);
+                        img.addEventListener('click', () => {
+                          openModal({
+                            title: '照片預覽',
+                            fields: [],
+                            submitText: '',
+                            refreshOnSubmit: false,
+                            onSubmit: async () => true,
+                            afterRender: ({ body }) => {
+                              const v = document.createElement('img');
+                              v.src = r.attachmentData;
+                              v.alt = '照片預覽';
+                              v.style.width = '100%';
+                              v.style.maxHeight = '80vh';
+                              v.style.objectFit = 'contain';
+                              body.appendChild(v);
+                            }
+                          });
+                        });
+                        body.prepend(img);
+                      }
+                      const fileInput = body.querySelector('[data-key="attachment"]');
+                      if (fileInput) {
+                        fileInput.addEventListener('change', () => {
+                          try {
+                            const f = fileInput.files?.[0];
+                            if (!f) { window.__leaveAttachmentData = ''; return; }
+                            const reader = new FileReader();
+                            reader.onload = () => { window.__leaveAttachmentData = String(reader.result || ''); };
+                            reader.readAsDataURL(f);
+                          } catch { window.__leaveAttachmentData = ''; }
+                        });
+                      }
+                    } catch {}
+                  },
+                });
+              });
+              btnDel.addEventListener('click', async () => {
+                if (btnDel.disabled) return;
+                const ok = await confirmAction({ title: '確認刪除', text: '確定要刪除此請假申請嗎？', confirmText: '刪除' });
+                if (!ok) return;
+                try {
+                  await ensureFirebase();
+                  if (db && fns.deleteDoc && fns.doc) {
+                    await fns.deleteDoc(fns.doc(db, 'leaveRequests', r.id));
+                  }
+                  try {
+                    const idx = list.findIndex((x) => x.id === r.id);
+                    if (idx >= 0) list.splice(idx, 1);
+                  } catch {}
+                  renderForMonth(monthInput.value);
+                } catch (e) {
+                  alert(`刪除失敗：${e?.message || e}`);
+                }
+              });
+              const actions = document.createElement('div');
+              actions.className = 'record-actions';
+              actions.appendChild(btnEdit);
+              actions.appendChild(btnDel);
+              if (r.attachmentData) {
+                const photoPreview = document.createElement('img');
+                photoPreview.src = r.attachmentData;
+                photoPreview.style.width = '80px';
+                photoPreview.style.height = '80px';
+                photoPreview.style.aspectRatio = '1';
+                photoPreview.style.objectFit = 'cover';
+                attachPressInteractions(photoPreview);
+                photoPreview.addEventListener('click', () => {
+                  openModal({
+                    title: '照片預覽',
+                    fields: [],
+                    submitText: '',
+                    refreshOnSubmit: false,
+                    onSubmit: async () => true,
+                    afterRender: ({ body }) => {
+                      const v = document.createElement('img');
+                      v.src = r.attachmentData;
+                      v.alt = '照片預覽';
+                      v.style.width = '100%';
+                      v.style.maxHeight = '80vh';
+                      v.style.objectFit = 'contain';
+                      body.appendChild(v);
+                    }
+                  });
+                });
+                status.appendChild(photoPreview);
+              }
+              card.appendChild(status);
+              card.appendChild(when);
+              card.appendChild(actions);
+              listRoot.appendChild(card);
+            });
+          }
+          renderForMonth(todayYm);
+          monthInput.addEventListener('change', () => renderForMonth(monthInput.value));
+          addBtn.addEventListener('click', () => {
+            openModal({
+              title: '新增請假',
+              fields: [
+                { key: 'type', label: '類型', type: 'select', options: [
+                  { value: '病假', label: '病假' },
+                  { value: '事假', label: '事假' },
+                  { value: '特休', label: '特休' },
+                  { value: '公假', label: '公假' },
+                  { value: '其他', label: '其他' },
+                ] },
+                { key: 'startAt', label: '開始', type: 'datetime-local', step: 60 },
+                { key: 'endAt', label: '結束', type: 'datetime-local', step: 60 },
+                { key: 'reason', label: '原因', type: 'text' },
+                { key: 'attachment', label: '上傳照片', type: 'file', accept: 'image/png,image/jpeg' },
+                ],
+                initial: { type: '病假' },
+                submitText: '送出申請',
+                refreshOnSubmit: false,
+                onSubmit: async (data) => {
+                  try {
+                    await ensureFirebase();
+                    const u = auth?.currentUser || null;
+                    const payload = {
+                      uid: u?.uid || null,
+                      name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || (u?.email || '使用者'),
+                      type: String(data.type || ''),
+                      startAt: String(data.startAt || ''),
+                      endAt: String(data.endAt || ''),
+                      reason: String(data.reason || ''),
+                      attachmentData: String(data.attachment || window.__leaveAttachmentData || ''),
+                      status: '送審',
+                      createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
+                    };
+                    let saved = false;
+                    let record = null;
+                    if (db && fns.addDoc && fns.collection) {
+                      try {
+                        const docRef = await fns.addDoc(fns.collection(db, 'leaveRequests'), payload);
+                        saved = true;
+                        const sdt = payload.startAt ? new Date(payload.startAt) : null;
+                        const edt = payload.endAt ? new Date(payload.endAt) : null;
+                        record = { id: docRef.id, ...payload, dt: new Date(), sdt: (sdt instanceof Date && !isNaN(sdt)) ? sdt : null, edt: (edt instanceof Date && !isNaN(edt)) ? edt : null };
+                      } catch {}
+                    }
+                    if (!saved) {
+                      const p2 = { ...payload };
+                      if (typeof p2.createdAt !== 'string') p2.createdAt = new Date().toISOString();
+                      enqueuePendingLeave(p2);
+                      const sdt = p2.startAt ? new Date(p2.startAt) : null;
+                      const edt = p2.endAt ? new Date(p2.endAt) : null;
+                      record = { id: `local-${Math.random().toString(36).slice(2)}`, ...p2, dt: new Date(p2.createdAt), sdt: (sdt instanceof Date && !isNaN(sdt)) ? sdt : null, edt: (edt instanceof Date && !isNaN(edt)) ? edt : null };
+                    }
+                    if (record) { try { list.unshift(record); } catch {} }
+                    renderForMonth(monthInput.value);
+                    return true;
+                  } catch (e) {
+                    const msg = e?.message || e;
+                    alert(typeof msg === 'string' ? `新增失敗：${msg}` : '新增失敗');
+                    return false;
+                  }
+                },
+                afterRender: ({ body }) => {
+                try {
+                  const fileInput = body.querySelector('[data-key="attachment"]');
+                  if (fileInput) {
+                    fileInput.addEventListener('change', () => {
+                      try {
+                        const f = fileInput.files?.[0];
+                        if (!f) { window.__leaveAttachmentData = ''; return; }
+                        const reader = new FileReader();
+                        reader.onload = () => { window.__leaveAttachmentData = String(reader.result || ''); };
+                        reader.readAsDataURL(f);
+                      } catch { window.__leaveAttachmentData = ''; }
+                    });
+                    // 已依需求移除拍照按鈕與相關流程
+                  }
+                } catch {}
+              },
+            });
+          });
+        } catch (e) {
+          const msg = e?.message || e;
+          container.textContent = typeof msg === 'string' ? `載入失敗：${msg}` : "載入失敗";
         }
       })();
       return;
@@ -5291,3 +5725,90 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
       }
     }
   }
+function renderSettingsRules() {
+  settingsContent.innerHTML = `
+    <div class="block" id="block-rules">
+      <div class="block-header"><span class="block-title">計點列表</span></div>
+      <div class="table-wrapper">
+        <table class="table" aria-label="計點列表">
+          <thead>
+            <tr>
+              <th>事由</th>
+              <th>處理</th>
+              <th>狀態</th>
+              <th>計點</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="rulesTbody"></tbody>
+        </table>
+      </div>
+    </div>`;
+  const table = settingsContent.querySelector('#block-rules table');
+  const tbody = settingsContent.querySelector('#rulesTbody');
+  (async () => {
+    try {
+      await ensureFirebase();
+      const ref = fns.collection(db, 'pointsRules');
+      const snap = await fns.getDocs(ref);
+      const list = [];
+      snap.forEach((doc) => { const data = doc.data() || {}; list.push({ id: doc.id, ...data }); });
+      appState.pointsRules = list;
+    } catch {}
+    if (tbody) {
+      tbody.innerHTML = (appState.pointsRules || []).map((r) => {
+        return `<tr data-id="${r.id}"><td>${r.reason || ''}</td><td>${r.handle || ''}</td><td>${r.status || ''}</td><td>${r.points ?? ''}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td></tr>`;
+      }).join('');
+    }
+  })();
+  if (!table) return;
+  table.addEventListener('click', async (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    const act = t.dataset.act || '';
+    if (!act) return;
+    const tr = t.closest('tr');
+    const idv = tr?.getAttribute('data-id') || '';
+    const idx = appState.pointsRules.findIndex((x) => x.id === idv);
+    if (idx < 0) return;
+    const r = appState.pointsRules[idx];
+    if (act === 'edit') {
+      openModal({
+        title: '編輯計點規則',
+        fields: [
+          { key: 'reason', label: '事由', type: 'text' },
+          { key: 'handle', label: '處理', type: 'text' },
+          { key: 'status', label: '狀態', type: 'select', options: [ { value: '正常', label: '正常' }, { value: '異常', label: '異常' } ] },
+          { key: 'points', label: '計點', type: 'number', step: 1 },
+        ],
+        initial: { reason: r.reason || '', handle: r.handle || '', status: r.status || '正常', points: r.points ?? 0 },
+        submitText: '儲存',
+        onSubmit: async (data) => {
+          try {
+            await ensureFirebase();
+            const payload = { reason: String(data.reason || ''), handle: String(data.handle || ''), status: String(data.status || '正常'), points: (data.points != null ? Number(data.points) : 0) };
+            if (db && fns.updateDoc && fns.doc) { await fns.updateDoc(fns.doc(db, 'pointsRules', r.id), payload); }
+            appState.pointsRules[idx] = { ...r, ...payload };
+            const rowHtml = `<td>${payload.reason}</td><td>${payload.handle}</td><td>${payload.status}</td><td>${payload.points}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td>`;
+            tr.innerHTML = rowHtml;
+            return true;
+          } catch (e) {
+            alert(`更新失敗：${e?.message || e}`);
+            return false;
+          }
+        }
+      });
+    } else if (act === 'del') {
+      const ok = await confirmAction({ title: '確認刪除', text: '確定要刪除這筆規則嗎？', confirmText: '刪除' });
+      if (!ok) return;
+      try {
+        await ensureFirebase();
+        if (db && fns.deleteDoc && fns.doc) { await fns.deleteDoc(fns.doc(db, 'pointsRules', r.id)); }
+        appState.pointsRules.splice(idx, 1);
+        tr?.parentElement?.removeChild(tr);
+      } catch (e) {
+        alert(`刪除失敗：${e?.message || e}`);
+      }
+    }
+  });
+}
