@@ -72,7 +72,7 @@ service cloud.firestore {
         request.resource.data.status == '待審核' &&
         (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp || request.resource.data.createdAt is string);
 
-      allow read: if isAdmin();
+      allow read: if isAdmin() || (isLoggedIn() && resource.data.email == request.auth.token.email);
       allow update, delete: if isAdmin();
     }
   }

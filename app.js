@@ -312,6 +312,7 @@ if (togglePasswordBtn) {
   pendingAccounts: [],
   currentUserId: null,
   currentUserRole: null,
+  currentUserEmail: null,
 };
 
 function id() {
@@ -1525,38 +1526,28 @@ async function importAccountsFromXLSX(file) {
               serviceCommunities: [],
               status: "待審核",
             };
-          if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
-            const fsPayload = {
-              photoUrl: pendingPayload.photoUrl,
-              name: pendingPayload.name,
-              title: pendingPayload.title,
-              email: pendingPayload.email,
-              phone: pendingPayload.phone,
-              licenses: pendingPayload.licenses,
-              role: pendingPayload.role,
-              companyId: pendingPayload.companyId,
-              serviceCommunities: pendingPayload.serviceCommunities,
-              status: pendingPayload.status,
-              createdAt: fns.serverTimestamp(),
-            };
-            let docId = null;
-            try {
+            if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
+              const fsPayload = {
+                photoUrl: pendingPayload.photoUrl,
+                name: pendingPayload.name,
+                title: pendingPayload.title,
+                email: pendingPayload.email,
+                phone: pendingPayload.phone,
+                licenses: pendingPayload.licenses,
+                role: pendingPayload.role,
+                companyId: pendingPayload.companyId,
+                serviceCommunities: pendingPayload.serviceCommunities,
+                status: pendingPayload.status,
+                createdAt: fns.serverTimestamp(),
+              };
               const ref = await fns.addDoc(fns.collection(db, "pendingAccounts"), fsPayload);
-              docId = ref.id;
-              appState.pendingAccounts.push({ id: docId, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
-            } catch {
-              const qPayload = { ...fsPayload };
-              if (typeof qPayload.createdAt !== 'string') qPayload.createdAt = new Date().toISOString();
-              enqueuePendingAccount(qPayload);
-              appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
+              appState.pendingAccounts.push({ id: ref.id, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
+              renderSettingsContent("帳號");
+              alert("已送出申請");
+              return true;
+            } else {
+              throw new Error("Firestore 未初始化，無法提交到雲端");
             }
-          } else {
-            // Firestore 尚未初始化時，先寫入前端狀態
-            appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "", createdAt: new Date().toISOString() });
-          }
-          renderSettingsContent("帳號");
-          alert("已送出申請");
-          return true;
         } catch (err) {
           alert(`提交帳號申請失敗：${err?.message || err}`);
           return false;
@@ -2698,7 +2689,7 @@ function renderSettingsAccounts() {
                 updatedAt: fns.serverTimestamp(),
               };
               await withRetry(() => fns.setDoc(fns.doc(db, "users", aid), payload, { merge: true }));
-              Object.assign(a, { ...d, uid: payload.uid });
+              Object.assign(a, { ...d, uid: a.uid || payload.uid || aid });
               if (appState.currentUserId && appState.currentUserId === aid) {
                 appState.currentUserRole = payload.role || appState.currentUserRole || "一般";
                 applyPagePermissionsForUser({ uid: aid });
@@ -2718,23 +2709,28 @@ function renderSettingsAccounts() {
           }
           const ok = await confirmAction({ title: "確認刪除帳號", text: `確定要刪除帳號「${a.name || a.email || aid}」嗎？此動作無法復原。`, confirmText: "刪除" });
           if (!ok) return;
-          try {
-            if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
-            await withRetry(() => fns.deleteDoc(fns.doc(db, "users", aid)));
-            try {
-              const targetUid = a.uid || aid;
-              if (targetUid && fns.functions && fns.httpsCallable) {
-                const delUser = fns.httpsCallable(fns.functions, "adminDeleteUser");
-                await delUser({ uid: targetUid });
-              }
-            } catch (_) {
-              // 若未部署雲端函式，則僅刪除 Firestore 文件，保留提示
-            }
-            appState.accounts = appState.accounts.filter((x) => x.id !== aid);
-            renderSettingsContent("帳號");
-          } catch (err) {
-            alert(`刪除帳號失敗：${err?.message || err}`);
+      try {
+        if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+        await withRetry(() => fns.deleteDoc(fns.doc(db, "users", aid)));
+        try {
+          const targetUid = a.uid || aid;
+          if (targetUid && fns.functions && fns.httpsCallable) {
+            const delUser = fns.httpsCallable(fns.functions, "adminDeleteUser");
+            await delUser({ uid: targetUid });
           }
+          // 若無 uid 或刪除失敗，以 email 嘗試刪除
+          if ((!a.uid || !a.uid.length) && a.email && fns.functions && fns.httpsCallable) {
+            const delByEmail = fns.httpsCallable(fns.functions, "adminDeleteUserByEmail");
+            await delByEmail({ email: a.email });
+          }
+        } catch (_) {
+          // 若未部署雲端函式，則僅刪除 Firestore 文件，保留提示
+        }
+        appState.accounts = appState.accounts.filter((x) => x.id !== aid);
+        renderSettingsContent("帳號");
+      } catch (err) {
+        alert(`刪除帳號失敗：${err?.message || err}`);
+      }
         })();
       }
     });
@@ -2956,7 +2952,8 @@ let ensureFirebasePromise = null;
   collection: null,
   deleteDoc: null,
   updateDoc: null,
-  serverTimestamp: null,
+    serverTimestamp: null,
+    onSnapshot: null,
   // Firebase Functions（雲端函式）
   functions: null,
     httpsCallable: null,
@@ -3066,6 +3063,7 @@ let ensureFirebasePromise = null;
       // 將目前使用者資訊保存於 appState 供權限檢查
       appState.currentUserId = user.uid;
       appState.currentUserRole = role;
+      appState.currentUserEmail = user.email || null;
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
       // 登入後嘗試同步離線期間累積的打卡紀錄
@@ -3384,6 +3382,7 @@ let ensureFirebasePromise = null;
         const d = docSnap.data() || {};
         items.push({
           id: docSnap.id,
+          uid: d.uid || docSnap.id,
           photoUrl: d.photoUrl || "",
           name: d.name || "",
           title: d.title || "",
@@ -3526,7 +3525,12 @@ let ensureFirebasePromise = null;
   async function loadPendingAccountsFromFirestore() {
     if (!db || !fns.getDocs || !fns.collection) return;
     try {
-      const snap = await fns.getDocs(fns.collection(db, "pendingAccounts"));
+      const role = appState.currentUserRole || "一般";
+      let q = fns.collection(db, "pendingAccounts");
+      if (role !== "系統管理員" && appState.currentUserEmail) {
+        q = fns.query(q, fns.where("email", "==", appState.currentUserEmail));
+      }
+      const snap = await fns.getDocs(q);
       const items = [];
       snap.forEach((docSnap) => {
         const d = docSnap.data() || {};
@@ -3662,6 +3666,10 @@ function applyPagePermissionsForUser(user) {
       featureSubTitle.textContent = label;
     } else if (activeMainTab === "settings") {
       if (settingsSubTitle) settingsSubTitle.textContent = label;
+      if (label === "帳號") {
+        const role = appState.currentUserRole || "一般";
+        if (role === "系統管理員") { try { loadPendingAccountsFromFirestore(); } catch {} }
+      }
       renderSettingsContent(label);
     }
   }
