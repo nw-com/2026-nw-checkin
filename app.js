@@ -622,10 +622,19 @@ async function flushPendingCheckins() {
     const v = localStorage.getItem(key);
     const arr = v ? JSON.parse(v) : [];
     if (!Array.isArray(arr) || !arr.length) return;
+    const failures = [];
     for (const p of arr) {
-      try { await withRetry(() => fns.addDoc(fns.collection(db, "checkins"), p)); } catch {}
+      try {
+        await withRetry(() => fns.addDoc(fns.collection(db, "checkins"), p));
+      } catch {
+        failures.push(p);
+      }
     }
-    localStorage.removeItem(key);
+    if (failures.length) {
+      localStorage.setItem(key, JSON.stringify(failures));
+    } else {
+      localStorage.removeItem(key);
+    }
   } catch {}
 }
 function getDeviceNameById(id) {
@@ -2962,6 +2971,18 @@ let ensureFirebasePromise = null;
         );
         const snap2 = await fns.getDocs(q2);
         let best = null;
+        const mapLabelToKey = (s) => {
+          switch (s) {
+            case '上班': return 'work';
+            case '下班': return 'off';
+            case '外出': return 'out';
+            case '抵達': return 'arrive';
+            case '返回': return 'return';
+            case '離開': return 'leave';
+            case '請假': return 'leave-request';
+            default: return 'work';
+          }
+        };
         snap2.forEach((docSnap) => {
           const d = docSnap.data();
           const val = d.createdAt;
@@ -2975,23 +2996,19 @@ let ensureFirebasePromise = null;
           const dateStr = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}:${String(dt.getSeconds()).padStart(2,'0')}`;
           const summary = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
           const label = d.status || '';
-          const mapLabelToKey = (s) => {
-            switch (s) {
-              case '上班': return 'work';
-              case '下班': return 'off';
-              case '外出': return 'out';
-              case '抵達': return 'arrive';
-              case '返回': return 'return';
-              case '離開': return 'leave';
-              case '請假': return 'leave-request';
-              default: return 'work';
-            }
-          };
           setHomeStatus(mapLabelToKey(label), label);
           if (homeStatusEl) renderHomeStatusText(summary);
           setLastCheckin(user.uid, { summary, key: mapLabelToKey(label), label });
         } else {
-          if (homeStatusEl) homeStatusEl.textContent = '';
+          const rest = await fetchLastCheckinViaRest(user.uid);
+          if (rest) {
+            const label = rest.status || '';
+            setHomeStatus(mapLabelToKey(label), label);
+            if (homeStatusEl) renderHomeStatusText(rest.summary || '');
+            setLastCheckin(user.uid, { summary: rest.summary || '', key: mapLabelToKey(label), label });
+          } else {
+            if (homeStatusEl) homeStatusEl.textContent = '';
+          }
         }
       } catch {}
 
