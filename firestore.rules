@@ -75,5 +75,30 @@ service cloud.firestore {
       allow read: if isAdmin() || (isLoggedIn() && resource.data.email == request.auth.token.email);
       allow update, delete: if isAdmin();
     }
+
+    // 請假申請：本人可讀與建立；更新/刪除限管理員或本人（且未核准）
+    match /leaveRequests/{docId} {
+      allow read: if isAdmin() || (isLoggedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isLoggedIn() && request.resource.data.uid == request.auth.uid && request.resource.data.status == '送審';
+      // 僅管理員可變更狀態；本人僅能在未核准時更新其它欄位（狀態不可變更）
+      allow update: if isAdmin() || (
+        isLoggedIn() &&
+        resource.data.uid == request.auth.uid &&
+        resource.data.status != '核准' &&
+        request.resource.data.status == resource.data.status
+      );
+      // 本人僅能刪除未核准的申請；管理員不受限
+      allow delete: if isAdmin() || (
+        isLoggedIn() && resource.data.uid == request.auth.uid && resource.data.status != '核准'
+      );
+    }
+
+    // 計點規則：僅管理員可讀寫
+    match /pointsRules/{docId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
   }
 }
