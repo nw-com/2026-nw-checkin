@@ -244,6 +244,8 @@ const checkinBtn = document.getElementById("checkinBtn");
 const checkinResult = document.getElementById("checkinResult");
 const checkinSubTitle = document.getElementById("checkinSubTitle");
 const settingsSubTitle = document.getElementById("settingsSubTitle");
+try { settingsSubTitle?.remove(); } catch {}
+try { const h = settingsSection?.querySelector('h3'); h?.remove(); } catch {}
 const leaderSubTitle = document.getElementById("leaderSubTitle");
 const manageSubTitle = document.getElementById("manageSubTitle");
 const featureSubTitle = document.getElementById("featureSubTitle");
@@ -319,7 +321,6 @@ function id() {
 function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmit, message, afterRender, refreshOnSubmit = true }) {
   if (!modalRoot) return;
   modalRoot.classList.remove("hidden");
-  modalRoot.innerHTML = "";
   const modal = document.createElement("div");
   modal.className = "modal";
 
@@ -572,8 +573,12 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
 
 function closeModal() {
   if (!modalRoot) return;
-  modalRoot.classList.add("hidden");
-  modalRoot.innerHTML = "";
+  const last = modalRoot.lastElementChild;
+  if (last) modalRoot.removeChild(last);
+  if (!modalRoot.children.length) {
+    modalRoot.classList.add("hidden");
+    modalRoot.innerHTML = "";
+  }
 }
 
 async function withRetry(fn, times = 3, delay = 500) {
@@ -626,6 +631,40 @@ async function flushPendingCheckins() {
     for (const p of arr) {
       try {
         await withRetry(() => fns.addDoc(fns.collection(db, "checkins"), p));
+      } catch {
+        failures.push(p);
+      }
+    }
+    if (failures.length) {
+      localStorage.setItem(key, JSON.stringify(failures));
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch {}
+}
+
+function enqueuePendingAccount(payload) {
+  try {
+    const key = "pendingAccountsQueue";
+    const v = localStorage.getItem(key);
+    const arr = v ? JSON.parse(v) : [];
+    arr.push(payload);
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch {}
+}
+
+async function flushPendingAccounts() {
+  try {
+    await ensureFirebase();
+    if (!db || !fns.addDoc || !fns.collection) return;
+    const key = "pendingAccountsQueue";
+    const v = localStorage.getItem(key);
+    const arr = v ? JSON.parse(v) : [];
+    if (!Array.isArray(arr) || !arr.length) return;
+    const failures = [];
+    for (const p of arr) {
+      try {
+        await withRetry(() => fns.addDoc(fns.collection(db, "pendingAccounts"), p));
       } catch {
         failures.push(p);
       }
@@ -961,6 +1000,24 @@ function optionList(items, labelKey = "name") {
     return an.localeCompare(bn, "zh-Hant");
   });
   return arr.map((it) => ({ value: it.id, label: it[labelKey], code: it.code }));
+}
+
+function compareCommunityByCode(a, b) {
+  const ca = String(a.code || "");
+  const cb = String(b.code || "");
+  const pa = ca.match(/^([A-Za-z])([0-9]{1,3})$/);
+  const pb = cb.match(/^([A-Za-z])([0-9]{1,3})$/);
+  if (pa && pb) {
+    const la = pa[1].toUpperCase();
+    const lb = pb[1].toUpperCase();
+    if (la !== lb) return la.localeCompare(lb, "en");
+    const na = parseInt(pa[2], 10) || 0;
+    const nb = parseInt(pb[2], 10) || 0;
+    return na - nb;
+  }
+  if (pa && !pb) return -1;
+  if (!pa && pb) return 1;
+  return ca.localeCompare(cb, "en");
 }
 function getRoles() {
   if (typeof window !== "undefined" && window.Roles && Array.isArray(window.Roles)) return window.Roles;
@@ -1468,32 +1525,42 @@ async function importAccountsFromXLSX(file) {
               serviceCommunities: [],
               status: "待審核",
             };
-            if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
-              const fsPayload = {
-                photoUrl: pendingPayload.photoUrl,
-                name: pendingPayload.name,
-                title: pendingPayload.title,
-                email: pendingPayload.email,
-                phone: pendingPayload.phone,
-                licenses: pendingPayload.licenses,
-                role: pendingPayload.role,
-                companyId: pendingPayload.companyId,
-                serviceCommunities: pendingPayload.serviceCommunities,
-                status: pendingPayload.status,
-                createdAt: fns.serverTimestamp(),
-              };
-              const docRef = await fns.addDoc(fns.collection(db, "pendingAccounts"), fsPayload);
-              appState.pendingAccounts.push({ id: docRef.id, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
-            } else {
-              // Firestore 尚未初始化時，先寫入前端狀態
-              appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "", createdAt: new Date().toISOString() });
+          if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
+            const fsPayload = {
+              photoUrl: pendingPayload.photoUrl,
+              name: pendingPayload.name,
+              title: pendingPayload.title,
+              email: pendingPayload.email,
+              phone: pendingPayload.phone,
+              licenses: pendingPayload.licenses,
+              role: pendingPayload.role,
+              companyId: pendingPayload.companyId,
+              serviceCommunities: pendingPayload.serviceCommunities,
+              status: pendingPayload.status,
+              createdAt: fns.serverTimestamp(),
+            };
+            let docId = null;
+            try {
+              const ref = await fns.addDoc(fns.collection(db, "pendingAccounts"), fsPayload);
+              docId = ref.id;
+              appState.pendingAccounts.push({ id: docId, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
+            } catch {
+              const qPayload = { ...fsPayload };
+              if (typeof qPayload.createdAt !== 'string') qPayload.createdAt = new Date().toISOString();
+              enqueuePendingAccount(qPayload);
+              appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
             }
-            renderSettingsContent("帳號");
-            return true;
-          } catch (err) {
-            alert(`提交帳號申請失敗：${err?.message || err}`);
-            return false;
+          } else {
+            // Firestore 尚未初始化時，先寫入前端狀態
+            appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "", createdAt: new Date().toISOString() });
           }
+          renderSettingsContent("帳號");
+          alert("已送出申請");
+          return true;
+        } catch (err) {
+          alert(`提交帳號申請失敗：${err?.message || err}`);
+          return false;
+        }
         },
     });
   });
@@ -2129,7 +2196,7 @@ function renderSettingsGeneral() {
 }
 
 function renderSettingsCommunities() {
-  const rows = appState.communities.map((c) => {
+  const rows = appState.communities.slice().sort(compareCommunityByCode).map((c) => {
     const regionName = appState.regions.find((r) => r.id === c.regionId)?.name || "";
     const companyName = appState.companies.find((co) => co.id === c.companyId)?.name || "";
     return `<tr data-id="${c.id}"><td>${companyName}</td><td>${c.code || ""}</td><td>${c.name || ""}</td><td>${c.address || ""}</td><td>${regionName}</td><td>${c.coords || ""}</td><td>${c.radiusMeters ?? ""}</td><td class="cell-actions"><button class="btn" data-act="edit">編輯</button><button class="btn" data-act="del">刪除</button></td></tr>`;
@@ -2654,6 +2721,15 @@ function renderSettingsAccounts() {
           try {
             if (!db || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
             await withRetry(() => fns.deleteDoc(fns.doc(db, "users", aid)));
+            try {
+              const targetUid = a.uid || aid;
+              if (targetUid && fns.functions && fns.httpsCallable) {
+                const delUser = fns.httpsCallable(fns.functions, "adminDeleteUser");
+                await delUser({ uid: targetUid });
+              }
+            } catch (_) {
+              // 若未部署雲端函式，則僅刪除 Firestore 文件，保留提示
+            }
             appState.accounts = appState.accounts.filter((x) => x.id !== aid);
             renderSettingsContent("帳號");
           } catch (err) {
@@ -2994,6 +3070,7 @@ let ensureFirebasePromise = null;
 
       // 登入後嘗試同步離線期間累積的打卡紀錄
       try { await flushPendingCheckins(); } catch {}
+      try { await flushPendingAccounts(); } catch {}
 
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
       applyPagePermissionsForUser(user);
@@ -3366,12 +3443,7 @@ let ensureFirebasePromise = null;
         const d = docSnap.data() || {};
         items.push({ id: docSnap.id, name: d.name || "", coords: d.coords || "", radiusMeters: d.radiusMeters ?? null, order: (typeof d.order === "number" ? d.order : null) });
       });
-      items.sort((a,b)=>{
-        const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
-        const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
-        if (ao !== bo) return ao - bo;
-        return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
-      });
+      items.sort(compareCommunityByCode);
       // 以雲端資料覆蓋本地預設項目，避免預設示例持續顯示
       appState.companies = items;
       if (activeMainTab === "settings" && activeSubTab === "一般") renderSettingsContent("一般");
@@ -3589,7 +3661,7 @@ function applyPagePermissionsForUser(user) {
     } else if (activeMainTab === "feature") {
       featureSubTitle.textContent = label;
     } else if (activeMainTab === "settings") {
-      settingsSubTitle.textContent = label;
+      if (settingsSubTitle) settingsSubTitle.textContent = label;
       renderSettingsContent(label);
     }
   }
