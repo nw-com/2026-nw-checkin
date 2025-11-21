@@ -606,14 +606,17 @@ function closeModal() {
   }
 }
 
-async function withRetry(fn, times = 3, delay = 500) {
+async function withRetry(fn, times = 5, delay = 600) {
   let lastErr = null;
   for (let i = 0; i < times; i++) {
     try { return await fn(); } catch (e) {
       lastErr = e;
       const s = String(e && e.message ? e.message : e);
-      if (i < times - 1 && (s.includes('ERR_ABORTED') || s.includes('AbortError') || s.includes('NetworkError'))) {
-        await new Promise((r) => setTimeout(r, delay * Math.pow(2, i)));
+      const retriable = s.includes('ERR_ABORTED') || s.includes('AbortError') || s.includes('NetworkError') || s.includes('documents:commit') || s.includes('documents:batchGet');
+      if (i < times - 1 && retriable) {
+        const base = delay * Math.pow(2, i);
+        const jitter = Math.floor(Math.random() * 250);
+        await new Promise((r) => setTimeout(r, base + jitter));
         continue;
       }
       throw e;
@@ -3129,21 +3132,38 @@ let ensureFirebasePromise = null;
   if (firebaseInitialized && auth && db) { return; }
   if (ensureFirebasePromise) { return ensureFirebasePromise; }
   ensureFirebasePromise = (async () => {
-    const importWithRetry = async (url) => withRetry(() => import(url));
-    const appMod = await importWithRetry("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js");
-    const authMod = await importWithRetry("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
-    const fsMod = await importWithRetry("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-lite.js");
+    const importFromCandidates = async (urls) => {
+      let lastErr = null;
+      for (const u of urls.filter(Boolean)) {
+        try { return await withRetry(() => import(u)); } catch (e) { lastErr = e; }
+      }
+      throw lastErr || new Error("import failed");
+    };
+    const appMod = await importFromCandidates([
+      "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js",
+      "https://cdn.skypack.dev/@firebase/app"
+    ]);
+    const authMod = await importFromCandidates([
+      "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js",
+      "https://cdn.skypack.dev/@firebase/auth"
+    ]);
+    const fsMod = await importFromCandidates([
+      "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-lite.js",
+      "https://cdn.skypack.dev/@firebase/firestore/lite"
+    ]);
     const { initializeApp } = appMod;
     const { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signInAnonymously } = authMod;
     const { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp, query, where, orderBy, limit } = fsMod;
     let getFunctions = null;
     let httpsCallable = null;
     try {
-      const mod = await importWithRetry("https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js");
+      const mod = await importFromCandidates([
+        "https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js",
+        "https://cdn.skypack.dev/@firebase/functions"
+      ]);
       getFunctions = mod.getFunctions;
       httpsCallable = mod.httpsCallable;
     } catch (err) {
-      console.warn("載入 Firebase Functions 模組失敗（忽略並持續初始化）：", err);
     }
 
   // 初始化 Firebase
@@ -3363,7 +3383,7 @@ let ensureFirebasePromise = null;
   }
   })();
   return ensureFirebasePromise;
-}
+  }
 
 // 分頁切換
   tabButtons.forEach((btn) => {
@@ -4501,9 +4521,30 @@ emailSignInBtn?.addEventListener("click", async () => {
 // 啟動：若設定已就緒，先行初始化以載入使用者狀態
 (async () => {
   if (isConfigReady()) {
+    try {
+      const links = [
+        "https://www.gstatic.com",
+        "https://firestore.googleapis.com",
+        "https://identitytoolkit.googleapis.com"
+      ];
+      links.forEach((href) => {
+        const l = document.createElement("link");
+        l.rel = "preconnect";
+        l.href = href;
+        l.crossOrigin = "anonymous";
+        document.head.appendChild(l);
+      });
+    } catch {}
     await ensureFirebase();
   }
 })();
+
+try {
+  window.addEventListener("online", () => { try { ensureFirebase(); } catch {} });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") { try { ensureFirebase(); } catch {} }
+  });
+} catch {}
 // 子分頁定義（頁中上）
 const SUB_TABS = {
   home: [],
