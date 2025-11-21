@@ -387,7 +387,47 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
       if (f.readonly) input.disabled = true;
     } else if (f.type === "multiselect") {
       input = document.createElement("div");
-      (f.options || []).forEach((opt) => {
+      const baseOptions = (f.options || []).slice();
+      const total = baseOptions.length;
+      const initialVals = Array.isArray(initial[f.key]) ? initial[f.key] : [];
+      let selectAllChk = null;
+      if (f.key === "serviceCommunities") {
+        const selectAllWrap = document.createElement("label");
+        selectAllWrap.style.display = "flex";
+        selectAllWrap.style.alignItems = "center";
+        selectAllWrap.style.gap = "6px";
+        selectAllChk = document.createElement("input");
+        selectAllChk.type = "checkbox";
+        selectAllChk.dataset.selectAll = "true";
+        selectAllChk.checked = total > 0 && initialVals.length === total;
+        if (f.readonly) selectAllChk.disabled = true;
+        selectAllWrap.appendChild(selectAllChk);
+        selectAllWrap.appendChild(document.createTextNode("全部勾選"));
+        input.appendChild(selectAllWrap);
+      }
+      const renderOptions = (() => {
+        if (f.key === "serviceCommunities") {
+          return baseOptions.slice().sort((a, b) => {
+            const ca = String(a.code || "");
+            const cb = String(b.code || "");
+            const pa = ca.match(/^([A-Za-z])(\d{1,3})$/);
+            const pb = cb.match(/^([A-Za-z])(\d{1,3})$/);
+            if (pa && pb) {
+              const la = pa[1].toUpperCase();
+              const lb = pb[1].toUpperCase();
+              if (la !== lb) return la.localeCompare(lb, "en");
+              const na = parseInt(pa[2], 10) || 0;
+              const nb = parseInt(pb[2], 10) || 0;
+              return na - nb;
+            }
+            if (pa && !pb) return -1;
+            if (!pa && pb) return 1;
+            return String(a.label || "").localeCompare(String(b.label || ""), "zh-Hant");
+          });
+        }
+        return baseOptions;
+      })();
+      renderOptions.forEach((opt) => {
         const wrap = document.createElement("label");
         wrap.style.display = "flex";
         wrap.style.alignItems = "center";
@@ -395,12 +435,26 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
         const chk = document.createElement("input");
         chk.type = "checkbox";
         chk.value = opt.value;
-        chk.checked = Array.isArray(initial[f.key]) && initial[f.key].includes(opt.value);
+        chk.checked = initialVals.includes(opt.value);
         if (f.readonly) chk.disabled = true;
+        if (selectAllChk) {
+          chk.addEventListener("change", () => {
+            const boxes = Array.from(input.querySelectorAll('input[type=checkbox]')).filter((c) => c.dataset.selectAll !== "true");
+            const allChecked = boxes.length > 0 && boxes.every((c) => c.checked);
+            selectAllChk.checked = allChecked;
+          });
+        }
         wrap.appendChild(chk);
-        wrap.appendChild(document.createTextNode(opt.label));
+        const lbl = opt.code ? `${opt.code} - ${opt.label}` : opt.label;
+        wrap.appendChild(document.createTextNode(lbl));
         input.appendChild(wrap);
       });
+      if (selectAllChk) {
+        selectAllChk.addEventListener("change", (e) => {
+          const boxes = Array.from(input.querySelectorAll('input[type=checkbox]')).filter((c) => c.dataset.selectAll !== "true");
+          boxes.forEach((c) => { c.checked = e.target.checked; });
+        });
+      }
       input.dataset.multikey = f.key;
     } else {
       input = document.createElement("input");
@@ -478,7 +532,7 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
     for (const el of inputs) {
       const key = el.dataset.key;
       if (el.tagName === "DIV" && el.dataset.multikey) {
-        const vals = Array.from(el.querySelectorAll("input[type=checkbox]:checked")).map((c) => c.value);
+        const vals = Array.from(el.querySelectorAll("input[type=checkbox]:checked:not([data-select-all='true'])")).map((c) => c.value);
         data[key] = vals;
       } else if (el.type === "file") {
         const file = el.files?.[0];
@@ -848,7 +902,16 @@ function fileToDataUrl(file) {
 }
 
 function optionList(items, labelKey = "name") {
-  return items.map((it) => ({ value: it.id, label: it[labelKey] }));
+  const arr = Array.isArray(items) ? items.slice() : [];
+  arr.sort((a, b) => {
+    const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+    const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+    if (ao !== bo) return ao - bo;
+    const an = String(a[labelKey] || "");
+    const bn = String(b[labelKey] || "");
+    return an.localeCompare(bn, "zh-Hant");
+  });
+  return arr.map((it) => ({ value: it.id, label: it[labelKey], code: it.code }));
 }
 function getRoles() {
   if (typeof window !== "undefined" && window.Roles && Array.isArray(window.Roles)) return window.Roles;
@@ -1265,6 +1328,7 @@ async function importAccountsFromXLSX(file) {
         licenses: licIds,
         role: r["角色"] || "一般",
         companyId,
+        companyIds: companyId ? [companyId] : [],
         serviceCommunities: serviceIds,
         status: r["狀況"] || "在職",
         updatedAt: fns?.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
@@ -1295,41 +1359,43 @@ async function importAccountsFromXLSX(file) {
 }
 
 // 登入頁面「帳號申請」
-if (applyAccountBtn) {
-  applyAccountBtn.addEventListener("click", () => {
-    openModal({
-      title: "帳號申請",
-      submitText: "送出申請",
-      fields: [
-        { key: "photoUrl", label: "大頭照", type: "file" },
-        { key: "name", label: "中文姓名", type: "text" },
-        { key: "title", label: "職稱", type: "text" },
-        { key: "email", label: "電子郵件", type: "email" },
-        { key: "phone", label: "手機號碼", type: "text" },
-        { key: "password", label: "預設密碼", type: "text" },
-        { key: "passwordConfirm", label: "確認密碼", type: "text" },
-        { key: "emergencyName", label: "緊急聯絡人", type: "text" },
-        { key: "emergencyRelation", label: "緊急聯絡人關係", type: "text" },
-        { key: "emergencyPhone", label: "緊急聯絡人手機號碼", type: "text" },
-        { key: "bloodType", label: "血型", type: "select", options: ["A","B","O","AB"].map((x)=>({value:x,label:x})) },
-        { key: "birthdate", label: "出生年月日", type: "date" },
-        { key: "licenses", label: "相關證照", type: "multiselect", options: optionList(appState.licenses) },
-      ],
-      onSubmit: async (d) => {
-        try {
-          // 密碼僅用於顯示，不寫入 Firestore
-          const pendingPayload = {
-            photoUrl: d.photoUrl || "",
-            name: d.name || "",
-            title: d.title || "",
-            email: d.email || "",
-            phone: d.phone || "",
-            licenses: Array.isArray(d.licenses) ? d.licenses : [],
-            role: "一般",
-        companyId: null,
-        serviceCommunities: [],
-        status: "待審核",
-      };
+  if (applyAccountBtn) {
+    applyAccountBtn.addEventListener("click", () => {
+      openModal({
+        title: "帳號申請",
+        submitText: "送出申請",
+        fields: [
+          { key: "photoUrl", label: "大頭照", type: "file" },
+          { key: "name", label: "中文姓名", type: "text" },
+          { key: "title", label: "職稱", type: "text" },
+          { key: "email", label: "電子郵件", type: "email" },
+          { key: "phone", label: "手機號碼", type: "text" },
+          { key: "password", label: "預設密碼", type: "text" },
+          { key: "passwordConfirm", label: "確認密碼", type: "text" },
+          { key: "emergencyName", label: "緊急聯絡人", type: "text" },
+          { key: "emergencyRelation", label: "緊急聯絡人關係", type: "text" },
+          { key: "emergencyPhone", label: "緊急聯絡人手機號碼", type: "text" },
+          { key: "bloodType", label: "血型", type: "select", options: ["A","B","O","AB"].map((x)=>({value:x,label:x})) },
+          { key: "birthdate", label: "出生年月日", type: "date" },
+          { key: "licenses", label: "相關證照", type: "multiselect", options: optionList(appState.licenses) },
+          { key: "companyIds", label: "公司", type: "multiselect", options: optionList(appState.companies) },
+          ],
+        onSubmit: async (d) => {
+          try {
+            // 密碼僅用於顯示，不寫入 Firestore
+            const pendingPayload = {
+              photoUrl: d.photoUrl || "",
+              name: d.name || "",
+              title: d.title || "",
+              email: d.email || "",
+              phone: d.phone || "",
+              licenses: Array.isArray(d.licenses) ? d.licenses : [],
+              role: "一般",
+              companyId: (Array.isArray(d.companyIds) && d.companyIds.length) ? d.companyIds[0] : null,
+              companyIds: Array.isArray(d.companyIds) ? d.companyIds : [],
+              serviceCommunities: [],
+              status: "待審核",
+            };
           if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
             const docRef = await fns.addDoc(fns.collection(db, "pendingAccounts"), {
               ...pendingPayload,
@@ -1652,15 +1718,16 @@ function renderSettingsGeneral() {
         { key: "name", label: "名稱", type: "text" },
         { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
         { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number", placeholder: "100" },
+        { key: "order", label: "順序", type: "number", placeholder: "0" },
       ],
       onSubmit: async (data) => {
         try {
-          const payload = { name: data.name || "", coords: data.coords || "", radiusMeters: data.radiusMeters ?? null, createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString() };
+          const payload = { name: data.name || "", coords: data.coords || "", radiusMeters: data.radiusMeters ?? null, order: (data.order != null ? Number(data.order) : null), createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString() };
           if (db && fns.addDoc && fns.collection) {
             const docRef = await fns.addDoc(fns.collection(db, "companies"), payload);
-            appState.companies.push({ id: docRef.id, name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters });
+            appState.companies.push({ id: docRef.id, name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters, order: payload.order ?? null });
           } else {
-            appState.companies.push({ id: id(), name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters });
+            appState.companies.push({ id: id(), name: payload.name, coords: payload.coords, radiusMeters: payload.radiusMeters, order: payload.order ?? null });
           }
           renderSettingsContent("一般");
           return true;
@@ -1750,17 +1817,19 @@ function renderSettingsGeneral() {
             { key: "name", label: "名稱", type: "text" },
             { key: "coords", label: "定位座標", type: "text" },
             { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
+            { key: "order", label: "順序", type: "number" },
           ],
           initial: co,
           onSubmit: async (data) => {
             try {
-              const next = { name: data.name ?? co.name, coords: data.coords ?? co.coords, radiusMeters: data.radiusMeters ?? co.radiusMeters ?? null };
+              const next = { name: data.name ?? co.name, coords: data.coords ?? co.coords, radiusMeters: data.radiusMeters ?? co.radiusMeters ?? null, order: (data.order != null ? Number(data.order) : (co.order ?? null)) };
               if (db && fns.setDoc && fns.doc) {
                 await fns.setDoc(fns.doc(db, "companies", cid), { ...next, updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString() }, { merge: true });
               }
               co.name = next.name;
               co.coords = next.coords;
               co.radiusMeters = next.radiusMeters;
+              co.order = next.order;
               renderSettingsContent("一般");
               return true;
             } catch (err) {
@@ -2029,11 +2098,12 @@ function renderSettingsCommunities() {
         { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
         { key: "coords", label: "定位座標", type: "text", placeholder: "lat,lng" },
         { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
+        { key: "order", label: "順序", type: "number" },
       ],
       onSubmit: async (d) => {
         try {
           if (!db || !fns.addDoc || !fns.collection) throw new Error("Firestore 未初始化");
-          const payload = { code: d.code || "", name: d.name || "", address: d.address || "", companyId: d.companyId || null, regionId: d.regionId || null, coords: d.coords || "", radiusMeters: d.radiusMeters ?? null, createdAt: fns.serverTimestamp() };
+          const payload = { code: d.code || "", name: d.name || "", address: d.address || "", companyId: d.companyId || null, regionId: d.regionId || null, coords: d.coords || "", radiusMeters: d.radiusMeters ?? null, order: (d.order != null ? Number(d.order) : null), createdAt: fns.serverTimestamp() };
           const docRef = await fns.addDoc(fns.collection(db, "communities"), payload);
           appState.communities.push({ id: docRef.id, ...payload });
         } catch (err) {
@@ -2109,6 +2179,7 @@ function renderSettingsCommunities() {
             { key: "regionId", label: "區域", type: "select", options: optionList(appState.regions) },
             { key: "coords", label: "定位座標", type: "text" },
             { key: "radiusMeters", label: "有效打卡範圍半徑(公尺)", type: "number" },
+            { key: "order", label: "順序", type: "number" },
           ],
           initial: item,
           onSubmit: async (d) => {
@@ -2122,6 +2193,7 @@ function renderSettingsCommunities() {
                 coords: d.coords ?? item.coords ?? "",
                 address: d.address ?? item.address ?? "",
                 radiusMeters: d.radiusMeters ?? item.radiusMeters ?? null,
+                order: (d.order != null ? Number(d.order) : (item.order ?? null)),
                 updatedAt: fns.serverTimestamp(),
               };
               await fns.setDoc(fns.doc(db, "communities", cid), payload, { merge: true });
@@ -2308,7 +2380,7 @@ function renderSettingsAccounts() {
         { key: "birthdate", label: "出生年月日", type: "date" },
         { key: "licenses", label: "相關證照", type: "multiselect", options: optionList(appState.licenses) },
         { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})) },
-        { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
+        { key: "companyIds", label: "公司", type: "multiselect", options: optionList(appState.companies) },
         { key: "serviceCommunities", label: "服務社區", type: "multiselect", options: optionList(appState.communities) },
         { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
       ],
@@ -2370,7 +2442,8 @@ function renderSettingsAccounts() {
             birthdate: d.birthdate || "",
           licenses: Array.isArray(d.licenses) ? d.licenses : [],
           role: d.role || "一般",
-          companyId: d.companyId || null,
+          companyIds: Array.isArray(d.companyIds) ? d.companyIds : [],
+          companyId: (Array.isArray(d.companyIds) && d.companyIds.length) ? d.companyIds[0] : null,
           serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
           status: d.status || "在職",
           createdAt: fns.serverTimestamp(),
@@ -2418,7 +2491,7 @@ function renderSettingsAccounts() {
             { key: "birthdate", label: "出生年月日", type: "date" },
             { key: "licenses", label: "相關證照", type: "multiselect", options: optionList(appState.licenses) },
             { key: "role", label: "角色", type: "select", options: getRoles().map((r)=>({value:r,label:r})) },
-            { key: "companyId", label: "公司", type: "select", options: optionList(appState.companies) },
+            { key: "companyIds", label: "公司", type: "multiselect", options: optionList(appState.companies) },
             { key: "serviceCommunities", label: "服務社區", type: "multiselect", options: optionList(appState.communities) },
             { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
           ],
@@ -2469,7 +2542,8 @@ function renderSettingsAccounts() {
                 birthdate: d.birthdate ?? a.birthdate ?? "",
                 licenses: Array.isArray(d.licenses) ? d.licenses : (Array.isArray(a.licenses) ? a.licenses : []),
                 role: d.role ?? a.role ?? "一般",
-                companyId: d.companyId ?? a.companyId ?? null,
+                companyIds: Array.isArray(d.companyIds) ? d.companyIds : (Array.isArray(a.companyIds) ? a.companyIds : (a.companyId ? [a.companyId] : [])),
+                companyId: (Array.isArray(d.companyIds) && d.companyIds.length) ? d.companyIds[0] : (Array.isArray(a.companyIds) && a.companyIds.length ? a.companyIds[0] : (a.companyId ?? null)),
                 serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : (Array.isArray(a.serviceCommunities) ? a.serviceCommunities : []),
                 status: d.status ?? a.status ?? "在職",
                 updatedAt: fns.serverTimestamp(),
@@ -2601,10 +2675,11 @@ function renderSettingsAccounts() {
               licenses: Array.isArray(item.licenses) ? item.licenses : [],
               role: item.role || "一般",
               companyId: item.companyId || null,
-        serviceCommunities: Array.isArray(item.serviceCommunities) ? item.serviceCommunities : [],
-        status: "在職",
-        createdAt: fns.serverTimestamp(),
-      };
+              companyIds: Array.isArray(item.companyIds) ? item.companyIds : (item.companyId ? [item.companyId] : []),
+              serviceCommunities: Array.isArray(item.serviceCommunities) ? item.serviceCommunities : [],
+              status: "在職",
+              createdAt: fns.serverTimestamp(),
+            };
             const userDoc = await fns.addDoc(fns.collection(db, "users"), payload);
 
             // 建立 Auth 帳號（先雲端函式，失敗則 REST），預設密碼 000000
@@ -2950,11 +3025,13 @@ let ensureFirebasePromise = null;
           { value: '其他', label: '其他' },
         ] },
         { key: 'reasonOther', label: '自定義事由', type: 'text' },
-        { key: 'datetime', label: '日期時間', type: 'datetime-local', placeholder: '請選擇日期時間' },
+        { key: 'startDatetime', label: '請假 日期時間 起', type: 'datetime-local', placeholder: '請選擇起始日期時間' },
+        { key: 'endDatetime', label: '請假 日期時間 止', type: 'datetime-local', placeholder: '請選擇結束日期時間' },
+        { key: 'totalHours', label: '總計 小時', type: 'number', readonly: true },
         { key: 'note', label: '備註', type: 'text' },
         { key: 'attachment', label: '上傳文件', type: 'file' },
       ],
-      initial: { reason: '事假', reasonOther: '', datetime: '', note: '' },
+      initial: { reason: '事假', reasonOther: '', startDatetime: '', endDatetime: '', totalHours: 0, note: '' },
       submitText: '送出',
       refreshOnSubmit: false,
       onSubmit: async (data) => {
@@ -2966,7 +3043,10 @@ let ensureFirebasePromise = null;
             uid: user?.uid || null,
             name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, ''),
             reason,
-            datetime: String(data.datetime || ''),
+            startDatetime: String(data.startDatetime || ''),
+            endDatetime: String(data.endDatetime || ''),
+            totalHours: typeof data.totalHours === 'number' ? data.totalHours : (Number(data.totalHours || 0)),
+            datetime: String(data.startDatetime || ''),
             note: String(data.note || ''),
             attachmentData: window.__leaveAttachmentData || '',
             createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
@@ -2988,6 +3068,26 @@ let ensureFirebasePromise = null;
           const sync = () => { const v = sel.value; other.parentElement.style.display = (v === '其他') ? '' : 'none'; };
           sync(); sel.addEventListener('change', sync);
         }
+        const startEl = body.querySelector('[data-key="startDatetime"]');
+        const endEl = body.querySelector('[data-key="endDatetime"]');
+        const hoursEl = body.querySelector('[data-key="totalHours"]');
+        const calc = () => {
+          try {
+            const sv = startEl?.value || '';
+            const ev = endEl?.value || '';
+            if (!sv || !ev) { if (hoursEl) hoursEl.value = ''; return; }
+            const s = new Date(sv);
+            const e = new Date(ev);
+            let h = (e.getTime() - s.getTime()) / 3600000;
+            if (!isFinite(h)) h = 0;
+            if (h < 0) h = 0;
+            const v = Math.round(h * 100) / 100;
+            if (hoursEl) hoursEl.value = String(v);
+          } catch { if (hoursEl) hoursEl.value = ''; }
+        };
+        if (startEl) startEl.addEventListener('change', calc);
+        if (endEl) endEl.addEventListener('change', calc);
+        calc();
         const fileInput = body.querySelector('[data-key="attachment"]');
         if (fileInput) {
           fileInput.addEventListener('change', () => {
@@ -3090,6 +3190,7 @@ let ensureFirebasePromise = null;
           licenses: Array.isArray(d.licenses) ? d.licenses : [],
           role: d.role || "一般",
           companyId: d.companyId || null,
+          companyIds: Array.isArray(d.companyIds) ? d.companyIds : (d.companyId ? [d.companyId] : []),
         serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
         status: d.status || "在職",
       });
@@ -3131,7 +3232,13 @@ let ensureFirebasePromise = null;
       const items = [];
       snap.forEach((docSnap) => {
         const d = docSnap.data() || {};
-        items.push({ id: docSnap.id, name: d.name || "", coords: d.coords || "", radiusMeters: d.radiusMeters ?? null });
+        items.push({ id: docSnap.id, name: d.name || "", coords: d.coords || "", radiusMeters: d.radiusMeters ?? null, order: (typeof d.order === "number" ? d.order : null) });
+      });
+      items.sort((a,b)=>{
+        const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+        const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
       });
       // 以雲端資料覆蓋本地預設項目，避免預設示例持續顯示
       appState.companies = items;
@@ -3192,7 +3299,14 @@ let ensureFirebasePromise = null;
           coords: d.coords || "",
           address: d.address || "",
           radiusMeters: d.radiusMeters ?? null,
+          order: (typeof d.order === "number" ? d.order : null),
         });
+      });
+      items.sort((a,b)=>{
+        const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+        const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
       });
       items.forEach((it) => {
         const idx = appState.communities.findIndex((a) => a.id === it.id);
@@ -3212,16 +3326,17 @@ let ensureFirebasePromise = null;
       const items = [];
       snap.forEach((docSnap) => {
         const d = docSnap.data() || {};
-        items.push({
-          id: docSnap.id,
-          photoUrl: d.photoUrl || "",
-          name: d.name || "",
-          title: d.title || "",
-          email: d.email || "",
-          phone: d.phone || "",
-          licenses: Array.isArray(d.licenses) ? d.licenses : [],
-          role: d.role || "一般",
-          companyId: d.companyId || null,
+      items.push({
+        id: docSnap.id,
+        photoUrl: d.photoUrl || "",
+        name: d.name || "",
+        title: d.title || "",
+        email: d.email || "",
+        phone: d.phone || "",
+        licenses: Array.isArray(d.licenses) ? d.licenses : [],
+        role: d.role || "一般",
+        companyId: d.companyId || null,
+        companyIds: Array.isArray(d.companyIds) ? d.companyIds : (d.companyId ? [d.companyId] : []),
         serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
         status: d.status || "待審核",
       });
@@ -4020,25 +4135,42 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     const uid = appState.currentUserId || null;
     const userAccount = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
     if (adminRoles.has(userRole)) {
-      // 管理類角色：僅帶入帳號所屬公司名稱（若未設定公司，才顯示全部公司以免卡關）
-      const companyId = userAccount?.companyId || null;
-      if (companyId) {
-        const co = appState.companies.find((c) => c.id === companyId) || null;
+      // 管理類角色：優先使用帳號選定公司（可多選）；若未設定公司，顯示全部公司以免卡關
+      if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+        const set = new Set(userAccount.companyIds);
+        const list = appState.companies.filter((c) => set.has(c.id)).slice().sort((a,b)=>{
+          const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+          const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+          if (ao !== bo) return ao - bo;
+          return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
+        });
+        options = list.map((c) => ({ value: c.id, label: c.name }));
+      } else if (userAccount?.companyId) {
+        const co = appState.companies.find((c) => c.id === userAccount.companyId) || null;
         options = co ? [{ value: co.id, label: co.name }] : [];
       }
       if (!options.length) options = optionList(appState.companies);
       sourceType = "company";
     } else {
       // 一般/勤務：帶入帳號的服務社區（可能為多個）；若未設定則帶入該帳號公司底下的社區；再不然顯示全部社區
-      const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
+        const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
       let communities = [];
       if (allowedCommunityIds && allowedCommunityIds.size > 0) {
         communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+      } else if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+        const coSet = new Set(userAccount.companyIds);
+        communities = appState.communities.filter((c) => coSet.has(c.companyId));
       } else if (userAccount?.companyId) {
         communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
       } else {
         communities = appState.communities.slice();
       }
+      communities = communities.slice().sort((a,b)=>{
+        const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+        const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
+      });
       options = communities.map((c) => ({ value: c.id, label: c.name }));
       sourceType = "community";
     }
