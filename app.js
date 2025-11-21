@@ -324,6 +324,8 @@ function openModal({ title, fields, initial = {}, submitText = "儲存", onSubmi
   modalRoot.classList.remove("hidden");
   const modal = document.createElement("div");
   modal.className = "modal";
+  const prev = modalRoot.lastElementChild;
+  if (prev) prev.style.display = "none";
 
   const header = document.createElement("div");
   header.className = "modal-header";
@@ -576,7 +578,10 @@ function closeModal() {
   if (!modalRoot) return;
   const last = modalRoot.lastElementChild;
   if (last) modalRoot.removeChild(last);
-  if (!modalRoot.children.length) {
+  const prev = modalRoot.lastElementChild;
+  if (prev) {
+    prev.style.display = "";
+  } else {
     modalRoot.classList.add("hidden");
     modalRoot.innerHTML = "";
   }
@@ -834,6 +839,40 @@ async function fetchLastCheckinViaRest(uid) {
   } catch {
     return null;
   }
+}
+
+async function createPendingAccountViaRest(payload) {
+  const projectId = (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.projectId) || null;
+  if (!projectId) throw new Error("缺少 projectId");
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/pendingAccounts`;
+  const toFields = (p) => {
+    const f = {};
+    if (p.photoUrl != null) f.photoUrl = { stringValue: String(p.photoUrl) };
+    if (p.name != null) f.name = { stringValue: String(p.name) };
+    if (p.title != null) f.title = { stringValue: String(p.title) };
+    if (p.email != null) f.email = { stringValue: String(p.email) };
+    if (p.phone != null) f.phone = { stringValue: String(p.phone) };
+    if (Array.isArray(p.licenses)) f.licenses = { arrayValue: { values: p.licenses.map((x) => ({ stringValue: String(x) })) } };
+    if (p.role != null) f.role = { stringValue: String(p.role) };
+    if (p.companyId != null) f.companyId = { stringValue: String(p.companyId) };
+    if (Array.isArray(p.serviceCommunities)) f.serviceCommunities = { arrayValue: { values: p.serviceCommunities.map((x) => ({ stringValue: String(x) })) } };
+    if (p.status != null) f.status = { stringValue: String(p.status) };
+    const ts = new Date().toISOString();
+    f.createdAt = { timestampValue: ts };
+    return f;
+  };
+  const body = { fields: toFields(payload) };
+  const token = await getIdToken();
+  const headers = { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.error?.message || res.statusText || "建立待審核帳號失敗";
+    throw new Error(msg);
+  }
+  const name = String(data.name || "");
+  const id = name.split("/").pop() || "";
+  return { id };
 }
 
 // 首頁：打卡項目選擇彈窗（僅「上班」「外出」可點，其餘灰色不可動作）
@@ -1497,6 +1536,10 @@ async function importAccountsFromXLSX(file) {
           ],
         onSubmit: async (d) => {
           try {
+            await ensureFirebase();
+            if (!auth?.currentUser && fns.signInAnonymously) {
+              try { await fns.signInAnonymously(auth); } catch {}
+            }
             let photoUrlStr = "";
             try {
               const f = d.photoUrl;
@@ -1518,8 +1561,8 @@ async function importAccountsFromXLSX(file) {
               photoUrl: photoUrlStr || "",
               name: d.name || "",
               title: d.title || "",
-              email: d.email || "",
-              phone: d.phone || "",
+              email: (d.email || "").trim(),
+              phone: (d.phone || "").trim(),
               licenses: Array.isArray(d.licenses) ? d.licenses : [],
               role: "一般",
               companyId: (Array.isArray(d.companyIds) && d.companyIds.length) ? d.companyIds[0] : null,
@@ -1527,21 +1570,52 @@ async function importAccountsFromXLSX(file) {
               status: "待審核",
             };
             if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
+              const normEmail = pendingPayload.email.toLowerCase();
+              const normPhone = pendingPayload.phone;
+              // 先檢查重複（users 與 pendingAccounts 皆檢查）
+              if (normEmail) {
+                try {
+                  const qU = fns.query(fns.collection(db, "users"), fns.where("email", "==", normEmail), fns.limit(1));
+                  const qP = fns.query(fns.collection(db, "pendingAccounts"), fns.where("email", "==", normEmail), fns.limit(1));
+                  const [sU, sP] = await Promise.all([fns.getDocs(qU), fns.getDocs(qP)]);
+                  if (!sU.empty || !sP.empty) { alert("電子郵件已申請過"); return false; }
+                } catch {}
+              }
+              if (normPhone) {
+                try {
+                  const qU2 = fns.query(fns.collection(db, "users"), fns.where("phone", "==", normPhone), fns.limit(1));
+                  const qP2 = fns.query(fns.collection(db, "pendingAccounts"), fns.where("phone", "==", normPhone), fns.limit(1));
+                  const [sU2, sP2] = await Promise.all([fns.getDocs(qU2), fns.getDocs(qP2)]);
+                  if (!sU2.empty || !sP2.empty) { alert("手機號碼已申請過"); return false; }
+                } catch {}
+              }
               const fsPayload = {
                 photoUrl: pendingPayload.photoUrl,
                 name: pendingPayload.name,
                 title: pendingPayload.title,
-                email: pendingPayload.email,
+                email: normEmail,
                 phone: pendingPayload.phone,
                 licenses: pendingPayload.licenses,
                 role: pendingPayload.role,
                 companyId: pendingPayload.companyId,
                 serviceCommunities: pendingPayload.serviceCommunities,
+                pagePermissions: [],
                 status: pendingPayload.status,
                 createdAt: fns.serverTimestamp(),
               };
-              const ref = await fns.addDoc(fns.collection(db, "pendingAccounts"), fsPayload);
-              appState.pendingAccounts.push({ id: ref.id, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
+              let newId = null;
+              try {
+                const ref = await fns.addDoc(fns.collection(db, "pendingAccounts"), fsPayload);
+                newId = ref.id;
+              } catch (e) {
+                try {
+                  const r = await createPendingAccountViaRest(fsPayload);
+                  newId = r.id;
+                } catch (e2) {
+                  throw e2;
+                }
+              }
+              appState.pendingAccounts.push({ id: newId, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
               renderSettingsContent("帳號");
               alert("已送出申請");
               return true;
@@ -2836,20 +2910,22 @@ function renderSettingsAccounts() {
             };
             const userDoc = await fns.addDoc(fns.collection(db, "users"), payload);
 
-            // 建立 Auth 帳號（先雲端函式，失敗則 REST），預設密碼 000000
             let authCreated = false;
             let authUid = null;
+            const rawPwd = (item && typeof item.password === 'string') ? item.password : '';
+            const rawConfirm = (item && typeof item.passwordConfirm === 'string') ? item.passwordConfirm : '';
+            const newPwd = (rawPwd && rawPwd === rawConfirm) ? rawPwd : '000000';
             if (item.email) {
               if (fns.functions && fns.httpsCallable) {
                 try {
                   const createUser = fns.httpsCallable(fns.functions, "adminCreateUser");
-                  const res = await createUser({ email: item.email, password: "000000", name: item.name || "", photoUrl: item.photoUrl || "" });
+                  const res = await createUser({ email: item.email, password: newPwd, name: item.name || "", photoUrl: item.photoUrl || "" });
                   authUid = res?.data?.uid || null;
                   authCreated = !!authUid;
                 } catch (err) {
                   console.warn("核准時建立 Auth 失敗，改用 REST", err);
                   try {
-                    const r = await createAuthUserViaRest(item.email, "000000");
+                    const r = await createAuthUserViaRest(item.email, newPwd);
                     authUid = r.uid;
                     authCreated = !!authUid;
                   } catch (err2) {
@@ -2858,7 +2934,7 @@ function renderSettingsAccounts() {
                 }
               } else {
                 try {
-                  const r = await createAuthUserViaRest(item.email, "000000");
+                  const r = await createAuthUserViaRest(item.email, newPwd);
                   authUid = r.uid;
                   authCreated = !!authUid;
                 } catch (err2) {
@@ -2888,7 +2964,11 @@ function renderSettingsAccounts() {
               renderSettingsContent("帳號");
             // 提示狀態：已核准基本資料；若未建立 Auth，提醒管理者後續處理
             if (authCreated) {
-              alert("核准完成：已加入帳號列表，登入預設密碼為 000000。");
+              if (newPwd === '000000') {
+                alert("核准完成：已加入帳號列表，登入預設密碼為 000000。");
+              } else {
+                alert("核准完成：已加入帳號列表，登入密碼為申請者自訂的密碼。");
+              }
             } else {
               alert("核准完成（部分）：已加入帳號列表，但未建立登入帳號（Auth）。請稍後在帳號列表設定密碼或部署雲端函式。");
             }
@@ -2966,7 +3046,7 @@ let ensureFirebasePromise = null;
   ensureFirebasePromise = (async () => {
     const [
       { initializeApp },
-      { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail },
+      { getAuth, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signInAnonymously },
       { getFirestore, doc, getDoc, setDoc, addDoc, collection, getDocs, deleteDoc, updateDoc, serverTimestamp, query, where, orderBy, limit }
     ] = await Promise.all([
       import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"),
@@ -2996,6 +3076,7 @@ let ensureFirebasePromise = null;
   fns.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
   fns.signOut = signOut;
   fns.sendPasswordResetEmail = sendPasswordResetEmail;
+  fns.signInAnonymously = signInAnonymously;
   fns.doc = doc;
   fns.getDoc = getDoc;
   fns.setDoc = setDoc;
