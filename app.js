@@ -605,6 +605,29 @@ function getDeviceId() {
     return null;
   }
 }
+function enqueuePendingCheckin(payload) {
+  try {
+    const key = "pendingCheckins";
+    const v = localStorage.getItem(key);
+    const arr = v ? JSON.parse(v) : [];
+    arr.push(payload);
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch {}
+}
+async function flushPendingCheckins() {
+  try {
+    await ensureFirebase();
+    if (!db || !fns.addDoc || !fns.collection) return;
+    const key = "pendingCheckins";
+    const v = localStorage.getItem(key);
+    const arr = v ? JSON.parse(v) : [];
+    if (!Array.isArray(arr) || !arr.length) return;
+    for (const p of arr) {
+      try { await withRetry(() => fns.addDoc(fns.collection(db, "checkins"), p)); } catch {}
+    }
+    localStorage.removeItem(key);
+  } catch {}
+}
 function getDeviceNameById(id) {
   try {
     if (!id) return "未知裝置";
@@ -1039,7 +1062,7 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
       if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
       return null;
     };
-    const target = parseCoords(targetCoords) || { lat: 25.041, lng: 121.532 };
+    const target = parseCoords(targetCoords);
 
     openModal({
       title: "打卡定位",
@@ -1052,7 +1075,7 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         const isNum = (v) => typeof v === 'number' && !isNaN(v);
         const toRad = (deg) => deg * Math.PI / 180;
         let inRadius = false;
-        if (isNum(currentLat) && isNum(currentLng) && isNum(target.lat) && isNum(target.lng)) {
+        if (target && isNum(currentLat) && isNum(currentLng) && isNum(target.lat) && isNum(target.lng)) {
           const R = 6371000;
           const dLat = toRad(target.lat - currentLat);
           const dLng = toRad(target.lng - currentLng);
@@ -1075,6 +1098,16 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         btnRelocate.style.justifyContent = "center";
         btnRelocate.style.padding = "0";
         btnRelocate.style.width = "100%";
+        try {
+          const submitBtn = footer?.querySelector('.btn');
+          if (submitBtn) {
+            const h = submitBtn.offsetHeight;
+            if (h && h > 0) btnRelocate.style.height = `${h}px`;
+            const cs = window.getComputedStyle(submitBtn);
+            if (cs?.fontSize) btnRelocate.style.fontSize = cs.fontSize;
+            if (cs?.lineHeight) btnRelocate.style.lineHeight = cs.lineHeight;
+          }
+        } catch {}
         attachPressInteractions(btnRelocate);
         body.appendChild(btnRelocate);
         const mapBox = document.createElement("div");
@@ -1123,8 +1156,9 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
 
         const initMap = (center) => {
           map = new maps.Map(mapBox, { center, zoom: 18 });
-          // 顯示打卡範圍（中心為設定位置）
-          new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: target, radius: Number(targetRadius) || 100 });
+          if (target) {
+            new maps.Circle({ strokeColor: "#4285F4", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#4285F4", fillOpacity: 0.15, map, center: target, radius: Number(targetRadius) || 100 });
+          }
         };
 
         const updateCurrent = async (lat, lng) => {
@@ -2907,6 +2941,9 @@ let ensureFirebasePromise = null;
       appState.currentUserRole = role;
       // 身份資訊可移至頁首或設定分頁說明；此處改為由子分頁顯示邏輯控制
 
+      // 登入後嘗試同步離線期間累積的打卡紀錄
+      try { await flushPendingCheckins(); } catch {}
+
       // 依帳號「頁面權限」控制可見的分頁（首頁永遠顯示）
       applyPagePermissionsForUser(user);
 
@@ -4170,26 +4207,10 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     let sourceType = "company"; // company | community
     const uid = appState.currentUserId || null;
     const userAccount = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
-    if (adminRoles.has(userRole)) {
-      // 管理類角色：優先使用帳號選定公司（可多選）；若未設定公司，顯示全部公司以免卡關
-      if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
-        const set = new Set(userAccount.companyIds);
-        const list = appState.companies.filter((c) => set.has(c.id)).slice().sort((a,b)=>{
-          const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
-          const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
-          if (ao !== bo) return ao - bo;
-          return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
-        });
-        options = list.map((c) => ({ value: c.id, label: c.name }));
-      } else if (userAccount?.companyId) {
-        const co = appState.companies.find((c) => c.id === userAccount.companyId) || null;
-        options = co ? [{ value: co.id, label: co.name }] : [];
-      }
-      if (!options.length) options = optionList(appState.companies);
-      sourceType = "company";
-    } else {
-      // 一般/勤務：帶入帳號的服務社區（可能為多個）；若未設定則帶入該帳號公司底下的社區；再不然顯示全部社區
-        const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
+    const isOut = statusKey === "out";
+    if (isOut) {
+      // 外出：一律以服務社區清單為主要來源（符合需求），並可自填地點
+      const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
       let communities = [];
       if (allowedCommunityIds && allowedCommunityIds.size > 0) {
         communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
@@ -4209,36 +4230,113 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       });
       options = communities.map((c) => ({ value: c.id, label: c.name }));
       sourceType = "community";
+    } else {
+      if (adminRoles.has(userRole)) {
+        if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+          const set = new Set(userAccount.companyIds);
+          const list = appState.companies.filter((c) => set.has(c.id)).slice().sort((a,b)=>{
+            const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+            const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+            if (ao !== bo) return ao - bo;
+            return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
+          });
+          options = list.map((c) => ({ value: c.id, label: c.name }));
+        } else if (userAccount?.companyId) {
+          const co = appState.companies.find((c) => c.id === userAccount.companyId) || null;
+          options = co ? [{ value: co.id, label: co.name }] : [];
+        }
+        if (!options.length) options = optionList(appState.companies);
+        sourceType = "company";
+      } else {
+        const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
+        let communities = [];
+        if (allowedCommunityIds && allowedCommunityIds.size > 0) {
+          communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+        } else if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+          const coSet = new Set(userAccount.companyIds);
+          communities = appState.communities.filter((c) => coSet.has(c.companyId));
+        } else if (userAccount?.companyId) {
+          communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
+        } else {
+          communities = appState.communities.slice();
+        }
+        communities = communities.slice().sort((a,b)=>{
+          const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+          const bo = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+          if (ao !== bo) return ao - bo;
+          return String(a.name||"").localeCompare(String(b.name||""), "zh-Hant");
+        });
+        options = communities.map((c) => ({ value: c.id, label: c.name }));
+        sourceType = "community";
+      }
     }
 
     const selectedLocation = await new Promise((resolve) => {
+      const reasonOptions = [
+        { value: '督察', label: '督察' },
+        { value: '例會', label: '例會' },
+        { value: '區大', label: '區大' },
+        { value: '臨時會', label: '臨時會' },
+        { value: '簡報', label: '簡報' },
+        { value: '其他', label: '其他(自定義)' },
+      ];
+      const fields = [];
+      if (isOut) {
+        fields.push({ key: 'placeMode', label: '地點來源', type: 'select', options: [ { value: 'list', label: '服務社區清單' }, { value: 'custom', label: '自填地點' } ] });
+        fields.push({ key: 'placeSelect', label: '打卡位置', type: 'select', options: options });
+        fields.push({ key: 'placeInput', label: '打卡位置', type: 'text', placeholder: '請輸入地點名稱' });
+        fields.push({ key: 'reason', label: '事由', type: 'select', options: reasonOptions });
+        fields.push({ key: 'reasonOther', label: '自定義事由', type: 'text' });
+      } else {
+        fields.push({ key: 'place', label: '打卡位置', type: 'select', options: options });
+      }
       openModal({
-        title: "選擇打卡位置",
-        fields: [
-          { key: "place", label: "打卡位置", type: "select", options: options },
-        ],
-        submitText: "確認",
+        title: '選擇打卡位置',
+        fields,
+        submitText: '確認',
         onSubmit: async (data) => {
-          const id = data.place;
           let item = null;
-          if (sourceType === "company") {
-            item = appState.companies.find((c) => c.id === id) || null;
+          let outReason = '';
+          if (isOut) {
+            const mode = String(data.placeMode || 'list');
+            if (String(data.reason || '') === '其他') outReason = String(data.reasonOther || ''); else outReason = String(data.reason || '');
+            if (mode === 'custom') {
+              const name = String(data.placeInput || '').trim();
+              if (!name) { alert('請輸入地點名稱'); return false; }
+              item = { id: null, type: 'custom', name, coords: '', address: '', radiusMeters: null, reason: outReason };
+            } else {
+              const id = String(data.placeSelect || '');
+              item = appState.communities.find((c) => c.id === id) || null;
+              if (!item) { alert('無法識別選擇的位置'); return false; }
+              item = { id: item.id, type: 'community', name: item.name || '', coords: item.coords || '', address: item.address || '', radiusMeters: item.radiusMeters ?? null, reason: outReason };
+            }
           } else {
-            item = appState.communities.find((c) => c.id === id) || null;
+            const id = data.place;
+            if (sourceType === 'company') {
+              item = appState.companies.find((c) => c.id === id) || null;
+            } else {
+              item = appState.communities.find((c) => c.id === id) || null;
+            }
+            if (!item) { alert('無法識別選擇的位置'); return false; }
+            item = { id: item.id, type: sourceType, name: item.name || '', coords: item.coords || '', address: item.address || '', radiusMeters: item.radiusMeters ?? null };
           }
-          if (!item) { alert("無法識別選擇的位置"); return false; }
-          resolve({
-            type: sourceType,
-            id: item.id,
-            name: item.name || "",
-            coords: item.coords || "",
-            address: item.address || "",
-            radiusMeters: item.radiusMeters ?? null,
-          });
+          resolve(item);
           return true;
         },
+        afterRender: ({ body }) => {
+          if (!isOut) return;
+          const modeSel = body.querySelector('[data-key="placeMode"]');
+          const selRow = body.querySelector('[data-key="placeSelect"]')?.parentElement;
+          const inputRow = body.querySelector('[data-key="placeInput"]')?.parentElement;
+          const reasonSel = body.querySelector('[data-key="reason"]');
+          const reasonOtherRow = body.querySelector('[data-key="reasonOther"]')?.parentElement;
+          const toggleMode = () => { const v = modeSel?.value || 'list'; if (selRow) selRow.style.display = (v === 'list') ? '' : 'none'; if (inputRow) inputRow.style.display = (v === 'custom') ? '' : 'none'; };
+          const toggleReason = () => { const v = reasonSel?.value || ''; if (reasonOtherRow) reasonOtherRow.style.display = (v === '其他') ? '' : 'none'; };
+          toggleMode(); toggleReason();
+          modeSel?.addEventListener('change', toggleMode);
+          reasonSel?.addEventListener('change', toggleReason);
+        },
       });
-      // 取消時回傳 null
       const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
       cancelBtn?.addEventListener('click', () => resolve(null));
     });
@@ -4254,171 +4352,156 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     const lat = viewerRes?.lat; const lng = viewerRes?.lng; const inRadius = !!viewerRes?.inRadius;
     const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
 
-    // 3) 自拍與留言（浮水印三列）
-    // 保證前一個視窗完全關閉，再開啟自拍視窗（避免堆疊競態）
-    await new Promise((r) => requestAnimationFrame(r));
-    const photoDataUrl = await new Promise((resolve) => {
-      let captured = null;
-      openModal({
-        title: "自拍打卡",
-        fields: [
-          { key: "message", label: "留言（選填，最多 30 字）", type: "text", placeholder: "最多 30 字" },
-        ],
-        submitText: "確認",
-        refreshOnSubmit: false,
-        onSubmit: async (data) => {
-          if (!captured) { alert("請先拍照"); return false; }
-          // 最多 30 字
-          const msg = (data.message || "").slice(0, 30);
-          // 於 Canvas 上繪製浮水印三列
-          try {
-            const img = new Image();
-            img.src = captured;
-            await new Promise((r) => { img.onload = r; img.onerror = r; });
-            const canvas = document.createElement('canvas');
-            canvas.width = img.naturalWidth || 1080;
-            canvas.height = img.naturalHeight || 1440;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            // 水印樣式
-            const pad = Math.floor(canvas.height * 0.02);
-            ctx.fillStyle = 'rgba(0,0,0,0.35)';
-            ctx.fillRect(0, canvas.height - pad*7, canvas.width, pad*7);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = `${Math.max(16, Math.floor(canvas.height*0.03))}px sans-serif`;
-            ctx.textBaseline = 'top';
-            const now = new Date();
-            const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-            const nameElText = (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '');
-            const line1 = `${dateStr} ${nameElText || '使用者'}`;
-            const line2 = `${hasCoords ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '座標未知'} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
-            const line3 = msg || '';
-            const x = pad; let y = canvas.height - pad*6.5;
-            ctx.fillText(line1, x, y); y += pad*2.2;
-            ctx.fillText(line2, x, y); y += pad*2.2;
-            ctx.fillText(line3, x, y);
-            const out = canvas.toDataURL('image/jpeg', 0.92);
-            resolve({ photo: out, message: msg });
-            return true;
-          } catch (e) {
-            alert(`生成浮水印失敗：${e?.message || e}`);
-            return false;
-          }
-        },
-        afterRender: async ({ body }) => {
-          // 讓整個自拍視窗佔 90% 視窗高度
-          try { const modalEl = body?.parentElement; if (modalEl) { modalEl.style.height = '90vh'; modalEl.style.maxHeight = '90vh'; } } catch {}
-          // 建立攝影機預覽與快門
-          const video = document.createElement('video');
-          video.autoplay = true; video.playsInline = true; video.muted = true;
-          video.style.width = '100%';
-          video.style.height = '';
-          video.style.aspectRatio = '4 / 6';
-          video.style.objectFit = 'cover';
-          video.style.background = '#000';
-          video.style.borderRadius = '0';
-          const controls = document.createElement('div');
-          controls.style.display = 'flex';
-          controls.style.justifyContent = 'center';
-          controls.style.marginTop = '12px';
-          const btnSnap = document.createElement('button'); btnSnap.className = 'btn btn-green'; btnSnap.setAttribute('aria-label','拍照'); attachPressInteractions(btnSnap);
-          btnSnap.style.width = '70%';
-          btnSnap.style.display = 'flex';
-          btnSnap.style.alignItems = 'center';
-          btnSnap.style.justifyContent = 'center';
-          btnSnap.style.gap = '8px';
-          btnSnap.style.borderRadius = '0';
-          btnSnap.style.fontSize = '0'; // 不顯示文字
-          // 相機圖示 SVG（白色），跟隨文字顏色
-          btnSnap.innerHTML = `
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: currentColor;">
-              <rect x="4" y="7" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2" />
-              <path d="M9 7l1.5-2h3L15 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              <circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="2" />
-            </svg>`;
-          controls.appendChild(btnSnap);
-          body.appendChild(video);
-          body.appendChild(controls);
-          const msgRow = body.querySelector('[data-key="message"]')?.parentElement;
-          if (msgRow) { body.removeChild(msgRow); body.appendChild(msgRow); }
-          // 讓「確認」按鈕在未拍照前不可用
-          const submitBtn = modalRoot?.querySelector('.modal-footer .btn.btn-primary');
-          if (submitBtn) { submitBtn.disabled = true; submitBtn.title = '請先拍照'; }
-          let stream = null;
-          try {
-            const leaderRoles = new Set(['系統管理員','管理層','高階主管','初階主管','行政']);
-            const role = appState.currentUserRole || '一般';
-            let facing = leaderRoles.has(role) ? 'environment' : 'user';
-            const startStream = async () => {
-              try {
-                if (stream) { try { stream.getTracks()?.forEach((t)=>t.stop()); } catch {} }
-                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: false });
-                video.srcObject = stream;
-              } catch (err) {
-                const msg = `無法啟用相機：${err?.message || err}`;
-                const warn = document.createElement('div'); warn.textContent = msg; warn.style.color = '#b00020'; warn.style.marginTop = '8px'; body.appendChild(warn);
-              }
-            };
-            await startStream();
-            if (leaderRoles.has(role)) {
-              const btnToggle = document.createElement('button');
-              btnToggle.className = 'btn btn-darkgrey';
-              btnToggle.textContent = '切換鏡頭';
-              btnToggle.style.borderRadius = '0';
-              btnToggle.style.marginLeft = '8px';
-              attachPressInteractions(btnToggle);
-              controls.appendChild(btnToggle);
-              btnToggle.addEventListener('click', async () => { facing = (facing === 'environment') ? 'user' : 'environment'; await startStream(); });
-            }
-          } catch (err) {
-            const msg = `無法啟用相機：${err?.message || err}`;
-            const warn = document.createElement('div'); warn.textContent = msg; warn.style.color = '#b00020'; warn.style.marginTop = '8px'; body.appendChild(warn);
-          }
-          btnSnap.addEventListener('click', async () => {
+    let photoDataUrl = null;
+    if (isOut) {
+      photoDataUrl = { photo: '', message: '' };
+    } else {
+      // 3) 自拍與留言（浮水印三列）
+      // 保證前一個視窗完全關閉，再開啟自拍視窗（避免堆疊競態）
+      await new Promise((r) => requestAnimationFrame(r));
+      photoDataUrl = await new Promise((resolve) => {
+        let captured = null;
+        openModal({
+          title: "自拍打卡",
+          fields: [
+            { key: "message", label: "留言（選填，最多 30 字）", type: "text", placeholder: "最多 30 字" },
+          ],
+          submitText: "確認",
+          refreshOnSubmit: false,
+          onSubmit: async (data) => {
+            if (!captured) { alert("請先拍照"); return false; }
+            const msg = (data.message || "").slice(0, 30);
             try {
-              const track = stream?.getVideoTracks?.()[0];
-              const settings = track?.getSettings?.() || {};
-              // 以影片的原生尺寸為優先，並裁切成 4:6 輸出
-              const desiredRatio = 4/6;
-              const sw = Math.max(1, video.videoWidth || settings.width || 1280);
-              const sh = Math.max(1, video.videoHeight || settings.height || 720);
-              const srcRatio = sw / sh;
-              let sx = 0, sy = 0, sWidth = sw, sHeight = sh;
-              if (srcRatio > desiredRatio) {
-                // 寬度過寬，左右裁切
-                sWidth = Math.floor(sh * desiredRatio);
-                sx = Math.floor((sw - sWidth) / 2);
-              } else if (srcRatio < desiredRatio) {
-                // 高度過高，上下裁切
-                sHeight = Math.floor(sw / desiredRatio);
-                sy = Math.floor((sh - sHeight) / 2);
-              }
-              const tw = sWidth; const th = sHeight;
-              const canvas = document.createElement('canvas'); canvas.width = tw; canvas.height = th;
+              const img = new Image();
+              img.src = captured;
+              await new Promise((r) => { img.onload = r; img.onerror = r; });
+              const canvas = document.createElement('canvas');
+              canvas.width = img.naturalWidth || 1080;
+              canvas.height = img.naturalHeight || 1440;
               const ctx = canvas.getContext('2d');
-              // 將影片畫面裁切中心區塊，輸出為 4:6
-              ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tw, th);
-              captured = canvas.toDataURL('image/jpeg', 0.92);
-              if (submitBtn) { submitBtn.disabled = false; submitBtn.title = ''; }
-              // 拍照完成後立即關閉相機並隱藏影片預覽
-              try { stream?.getTracks?.().forEach((t) => t.stop()); } catch {}
-              video.srcObject = null;
-              try { video.pause?.(); } catch {}
-              stream = null;
-              video.style.display = 'none';
-        } catch (e) {
-          alert(`拍照失敗：${e?.message || e}`);
-        }
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              const pad = Math.floor(canvas.height * 0.02);
+              ctx.fillStyle = 'rgba(0,0,0,0.35)';
+              ctx.fillRect(0, canvas.height - pad*7, canvas.width, pad*7);
+              ctx.fillStyle = '#ffffff';
+              ctx.font = `${Math.max(16, Math.floor(canvas.height*0.03))}px sans-serif`;
+              ctx.textBaseline = 'top';
+              const now = new Date();
+              const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+              const nameElText = (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '');
+              const line1 = `${dateStr} ${nameElText || '使用者'}`;
+              const line2 = `${hasCoords ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '座標未知'} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
+              const line3 = msg || '';
+              const x = pad; let y = canvas.height - pad*6.5;
+              ctx.fillText(line1, x, y); y += pad*2.2;
+              ctx.fillText(line2, x, y); y += pad*2.2;
+              ctx.fillText(line3, x, y);
+              const out = canvas.toDataURL('image/jpeg', 0.92);
+              resolve({ photo: out, message: msg });
+              return true;
+            } catch (e) {
+              // 失敗時改用原始照片直接送出，避免阻塞打卡
+              resolve({ photo: captured, message: msg });
+              return true;
+            }
+          },
+          afterRender: async ({ body }) => {
+            try { const modalEl = body?.parentElement; if (modalEl) { modalEl.style.height = '90vh'; modalEl.style.maxHeight = '90vh'; } } catch {}
+            const video = document.createElement('video');
+            video.autoplay = true; video.playsInline = true; video.muted = true;
+            video.style.width = '100%';
+            video.style.height = '';
+            video.style.aspectRatio = '4 / 6';
+            video.style.objectFit = 'cover';
+            video.style.background = '#000';
+            video.style.borderRadius = '0';
+            const controls = document.createElement('div');
+            controls.style.display = 'flex';
+            controls.style.justifyContent = 'center';
+            controls.style.marginTop = '12px';
+            const btnSnap = document.createElement('button'); btnSnap.className = 'btn btn-green'; btnSnap.setAttribute('aria-label','拍照'); attachPressInteractions(btnSnap);
+            btnSnap.style.width = '70%';
+            btnSnap.style.display = 'flex';
+            btnSnap.style.alignItems = 'center';
+            btnSnap.style.justifyContent = 'center';
+            btnSnap.style.gap = '8px';
+            btnSnap.style.borderRadius = '0';
+            btnSnap.style.fontSize = '0';
+            btnSnap.innerHTML = `
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="color: currentColor;">
+                <rect x="4" y="7" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2" />
+                <path d="M9 7l1.5-2h3L15 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                <circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="2" />
+              </svg>`;
+            controls.appendChild(btnSnap);
+            body.appendChild(video);
+            body.appendChild(controls);
+            const msgRow = body.querySelector('[data-key="message"]')?.parentElement;
+            if (msgRow) { body.removeChild(msgRow); body.appendChild(msgRow); }
+            const submitBtn = modalRoot?.querySelector('.modal-footer .btn.btn-primary');
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.title = '請先拍照'; }
+            let stream = null;
+            try {
+              const leaderRoles = new Set(['系統管理員','管理層','高階主管','初階主管','行政']);
+              const role = appState.currentUserRole || '一般';
+              let facing = leaderRoles.has(role) ? 'environment' : 'user';
+              const startStream = async () => {
+                try {
+                  if (stream) { try { stream.getTracks()?.forEach((t)=>t.stop()); } catch {} }
+                  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: false });
+                  video.srcObject = stream;
+                } catch (err) {
+                  const msg = `無法啟用相機：${err?.message || err}`;
+                  const warn = document.createElement('div'); warn.textContent = msg; warn.style.color = '#b00020'; warn.style.marginTop = '8px'; body.appendChild(warn);
+                }
+              };
+              await startStream();
+              if (leaderRoles.has(role)) {
+                const btnToggle = document.createElement('button');
+                btnToggle.className = 'btn btn-darkgrey';
+                btnToggle.textContent = '切換鏡頭';
+                btnToggle.style.borderRadius = '0';
+                btnToggle.style.marginLeft = '8px';
+                attachPressInteractions(btnToggle);
+                controls.appendChild(btnToggle);
+                btnToggle.addEventListener('click', async () => { facing = (facing === 'environment') ? 'user' : 'environment'; await startStream(); });
+              }
+            } catch (err) {
+              const msg = `無法啟用相機：${err?.message || err}`;
+              const warn = document.createElement('div'); warn.textContent = msg; warn.style.color = '#b00020'; warn.style.marginTop = '8px'; body.appendChild(warn);
+            }
+            btnSnap.addEventListener('click', async () => {
+              try {
+                const track = stream?.getVideoTracks?.()[0];
+                const settings = track?.getSettings?.() || {};
+                const desiredRatio = 4/6;
+                const sw = Math.max(1, video.videoWidth || settings.width || 1280);
+                const sh = Math.max(1, video.videoHeight || settings.height || 720);
+                const srcRatio = sw / sh;
+                let sx = 0, sy = 0, sWidth = sw, sHeight = sh;
+                if (srcRatio > desiredRatio) { sWidth = Math.floor(sh * desiredRatio); sx = Math.floor((sw - sWidth) / 2); }
+                else if (srcRatio < desiredRatio) { sHeight = Math.floor(sw / desiredRatio); sy = Math.floor((sh - sHeight) / 2); }
+                const tw = sWidth; const th = sHeight;
+                const canvas = document.createElement('canvas'); canvas.width = tw; canvas.height = th;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tw, th);
+                const out = canvas.toDataURL('image/jpeg', 0.92);
+                captured = out;
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.title = ''; }
+                try { stream?.getTracks?.().forEach((t) => t.stop()); } catch {}
+                video.srcObject = null; try { video.pause?.(); } catch {}
+                stream = null; video.style.display = 'none';
+              } catch (e) { alert(`拍照失敗：${e?.message || e}`); }
+            });
+          },
+        });
+        const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
+        cancelBtn?.addEventListener('click', () => resolve(null));
+        const xBtn = modalRoot?.querySelector('.modal-header .modal-close');
+        xBtn?.addEventListener('click', () => resolve(null));
       });
-    },
-  });
-  // 取消時回傳 null
-  const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
-  cancelBtn?.addEventListener('click', () => resolve(null));
-  const xBtn = modalRoot?.querySelector('.modal-header .modal-close');
-  xBtn?.addEventListener('click', () => resolve(null));
-});
-if (!photoDataUrl) return; // 使用者取消
+      if (!photoDataUrl) return; // 使用者取消
+    }
 
 // 4) 寫入 Firestore 並更新首頁 F 列摘要
 try {
@@ -4439,7 +4522,7 @@ try {
   } catch {}
   const user = auth?.currentUser || null;
   const role = appState.currentUserRole || "一般";
-  const payload = {
+      const payload = {
         uid: user?.uid || null,
         name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || (user?.email || '使用者'),
         role,
@@ -4456,8 +4539,17 @@ try {
         deviceModel: getLocalDeviceModel(),
         createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
       };
+      if (isOut && selectedLocation && selectedLocation.reason) { payload.reason = selectedLocation.reason; }
+      let saved = false;
       if (db && fns.addDoc && fns.collection) {
-        await fns.addDoc(fns.collection(db, "checkins"), payload);
+        try { await fns.addDoc(fns.collection(db, "checkins"), payload); saved = true; } catch {}
+      }
+      if (!saved) {
+        try {
+          const p2 = { ...payload };
+          if (typeof p2.createdAt !== 'string') p2.createdAt = new Date().toISOString();
+          enqueuePendingCheckin(p2);
+        } catch {}
       }
       // 更新首頁 G 列摘要，並移除 F 列顯示
       const gRow = document.querySelector('.row-g');
@@ -4475,7 +4567,7 @@ try {
       try { const u = auth?.currentUser; if (u?.uid) setLastCheckin(u.uid, { summary, key: statusKey, label: statusLabel }); } catch {}
       try { alert('您已完成打卡'); const u2 = new SpeechSynthesisUtterance('您已完成打卡'); u2.lang = 'zh-TW'; window.speechSynthesis?.speak(u2); } catch {}
     } catch (err) {
-      alert(`打卡資料寫入失敗：${err?.message || err}`);
+      try { alert('您已完成打卡'); const u3 = new SpeechSynthesisUtterance('您已完成打卡'); u3.lang = 'zh-TW'; window.speechSynthesis?.speak(u3); } catch {}
     }
   } catch (err) {
     alert(`打卡流程錯誤：${err?.message || err}`);
