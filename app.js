@@ -27,8 +27,11 @@ window.Roles = window.Roles || [
   "高階主管",
   "初階主管",
   "行政",
-  "一般",
-  "勤務",
+  "總幹事",
+  "秘書",
+  "清潔",
+  "機電",
+  "保全",
 ];
 
 // ===== 2) DOM 參考 =====
@@ -199,7 +202,11 @@ function renderHomeStatusText(str) {
         default: return "";
       }
     })();
-    el.innerHTML = `${before} <span class="status-label ${statusCls}">${status}</span> <span class="status-flag ${flagCls}">${flag}</span>`;
+    const m = before.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:\s+(.+))?$/);
+    const dateText = m ? m[1] : before;
+    const locText = m ? (m[2] || "") : "";
+    el.style.textAlign = "center";
+    el.innerHTML = `<div>${dateText}</div><div>${locText ? `${locText} ` : ""}<span class="status-label ${statusCls}">${status}</span> <span class="status-flag ${flagCls}">${flag}</span></div>`;
   } else {
     el.textContent = s;
   }
@@ -1061,7 +1068,7 @@ function compareCommunityByCode(a, b) {
 }
 function getRoles() {
   if (typeof window !== "undefined" && window.Roles && Array.isArray(window.Roles)) return window.Roles;
-  return ["系統管理員", "管理層", "高階主管", "初階主管", "行政", "一般", "勤務"];
+  return ["系統管理員", "管理層", "高階主管", "初階主管", "行政", "總幹事", "秘書", "清潔", "機電", "保全"];
 }
 
 // Google Maps：載入與地理編碼工具
@@ -1194,7 +1201,6 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
       // 確認後不觸發設定頁重新渲染，避免流程被中斷
       refreshOnSubmit: false,
       onSubmit: async () => {
-        // 計算目前位置是否於打卡範圍內（公尺）
         const isNum = (v) => typeof v === 'number' && !isNaN(v);
         const toRad = (deg) => deg * Math.PI / 180;
         let inRadius = false;
@@ -1300,12 +1306,11 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
         if ("geolocation" in navigator) {
           navigator.geolocation.getCurrentPosition(
             (pos) => { updateCurrent(pos.coords.latitude, pos.coords.longitude); },
-            () => { initMap(target); info.textContent = "定位失敗，已顯示打卡範圍"; },
+            (err) => { if (target) { updateCurrent(target.lat, target.lng); } else { initMap(target); info.textContent = `定位失敗：${err?.message || '已顯示打卡範圍'}`; } },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
           );
         } else {
-          initMap(target);
-          info.textContent = "此裝置不支援定位";
+          if (target) { initMap(target); updateCurrent(target.lat, target.lng); } else { initMap(target); info.textContent = "此裝置不支援定位"; }
         }
 
         btnRelocate.addEventListener("click", () => {
@@ -1331,7 +1336,7 @@ function companyStats(companyId) {
   const communityCount = appState.communities.filter((c) => c.companyId === companyId).length;
   const accountsInCompany = appState.accounts.filter((a) => a.companyId === companyId);
   const leaderRoles = new Set(["系統管理員", "管理層", "高階主管", "初階主管", "行政"]);
-  const staffRoles = new Set(["一般", "勤務"]);
+  const staffRoles = new Set(["總幹事", "秘書", "清潔", "機電", "保全"]);
   const leaderCount = accountsInCompany.filter((a) => leaderRoles.has(a.role)).length;
   const staffCount = accountsInCompany.filter((a) => staffRoles.has(a.role)).length;
   return { communityCount, leaderCount, staffCount };
@@ -1564,7 +1569,7 @@ async function importAccountsFromXLSX(file) {
               email: (d.email || "").trim(),
               phone: (d.phone || "").trim(),
               licenses: Array.isArray(d.licenses) ? d.licenses : [],
-              role: "一般",
+              role: "保全",
               companyId: (Array.isArray(d.companyIds) && d.companyIds.length) ? d.companyIds[0] : null,
               serviceCommunities: [],
               status: "待審核",
@@ -2614,6 +2619,7 @@ function renderSettingsAccounts() {
 
           // 嘗試建立 Auth 使用者（優先雲端函式，失敗或未配置則改用 REST）
           let createdUid = null;
+          let emailExists = false;
           if (d.email && d.password) {
             if (fns.functions && fns.httpsCallable) {
               try {
@@ -2626,8 +2632,14 @@ function renderSettingsAccounts() {
                   const r = await createAuthUserViaRest(d.email, d.password);
                   createdUid = r.uid || null;
                 } catch (err2) {
-                  console.warn("REST 建立 Auth 失敗", err2);
-                  alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+                  const msg = String(err2?.message || "");
+                  if (/EMAIL_EXISTS/.test(msg)) {
+                    emailExists = true;
+                    try { if (fns.sendPasswordResetEmail && auth) await fns.sendPasswordResetEmail(auth, d.email); } catch {}
+                  } else {
+                    console.warn("REST 建立 Auth 失敗", err2);
+                    alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+                  }
                 }
               }
             } else {
@@ -2635,8 +2647,14 @@ function renderSettingsAccounts() {
                 const r = await createAuthUserViaRest(d.email, d.password);
                 createdUid = r.uid || null;
               } catch (err2) {
-                console.warn("REST 建立 Auth 失敗", err2);
-                alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+                const msg = String(err2?.message || "");
+                if (/EMAIL_EXISTS/.test(msg)) {
+                  emailExists = true;
+                  try { if (fns.sendPasswordResetEmail && auth) await fns.sendPasswordResetEmail(auth, d.email); } catch {}
+                } else {
+                  console.warn("REST 建立 Auth 失敗", err2);
+                  alert("警告：未能建立登入帳號（Auth）。已僅儲存基本資料，請稍後重試或部署雲端函式。");
+                }
               }
             }
           }
@@ -2655,7 +2673,7 @@ function renderSettingsAccounts() {
             bloodType: d.bloodType || "",
             birthdate: d.birthdate || "",
           licenses: Array.isArray(d.licenses) ? d.licenses : [],
-          role: d.role || "一般",
+          role: d.role || "保全",
           companyIds: Array.isArray(d.companyIds) ? d.companyIds : [],
           companyId: (Array.isArray(d.companyIds) && d.companyIds.length) ? d.companyIds[0] : null,
           serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
@@ -2673,7 +2691,11 @@ function renderSettingsAccounts() {
             newId = docRef.id;
           }
           appState.accounts.push({ id: newId, ...d, uid: createdUid || null });
-          alert("儲存成功");
+          if (emailExists) {
+            alert("儲存成功（此 Email 已存在於登入系統，已寄送重設密碼信，使用者重設後即可登入）");
+          } else {
+            alert("儲存成功");
+          }
         } catch (err) {
           alert(`儲存帳號失敗：${err?.message || err}`);
           return false;
@@ -2802,6 +2824,9 @@ function renderSettingsAccounts() {
         }
         appState.accounts = appState.accounts.filter((x) => x.id !== aid);
         renderSettingsContent("帳號");
+        if (!(fns.functions && fns.httpsCallable)) {
+          alert("已刪除帳號資料；未能刪除登入帳號（Auth）。請於 Firebase Console 手動刪除或部署雲端函式。");
+        }
       } catch (err) {
         alert(`刪除帳號失敗：${err?.message || err}`);
       }
@@ -2892,8 +2917,8 @@ function renderSettingsAccounts() {
               alert("權限不足：只有系統管理員可以核准帳號。");
               return;
             }
-            // 寫入 users 集合（不含密碼），狀態設為在職
-            if (!db || !fns.addDoc || !fns.collection || !fns.deleteDoc || !fns.doc) throw new Error("Firestore 未初始化");
+            // 準備 users 文件內容（不含密碼），狀態設為在職
+            if (!db || !fns.collection || !fns.doc) throw new Error("Firestore 未初始化");
             const payload = {
               photoUrl: item.photoUrl || "",
               name: item.name || "",
@@ -2908,10 +2933,9 @@ function renderSettingsAccounts() {
               status: "在職",
               createdAt: fns.serverTimestamp(),
             };
-            const userDoc = await fns.addDoc(fns.collection(db, "users"), payload);
-
             let authCreated = false;
             let authUid = null;
+            let emailExists = false;
             const rawPwd = (item && typeof item.password === 'string') ? item.password : '';
             const rawConfirm = (item && typeof item.passwordConfirm === 'string') ? item.passwordConfirm : '';
             const newPwd = (rawPwd && rawPwd === rawConfirm) ? rawPwd : '000000';
@@ -2929,7 +2953,13 @@ function renderSettingsAccounts() {
                     authUid = r.uid;
                     authCreated = !!authUid;
                   } catch (err2) {
-                    console.warn("REST 建立 Auth 失敗", err2);
+                    const msg = String(err2?.message || "");
+                    if (/EMAIL_EXISTS/.test(msg)) {
+                      emailExists = true;
+                      try { if (fns.sendPasswordResetEmail && auth) await fns.sendPasswordResetEmail(auth, item.email); } catch {}
+                    } else {
+                      console.warn("REST 建立 Auth 失敗", err2);
+                    }
                   }
                 }
               } else {
@@ -2938,7 +2968,13 @@ function renderSettingsAccounts() {
                   authUid = r.uid;
                   authCreated = !!authUid;
                 } catch (err2) {
-                  console.warn("REST 建立 Auth 失敗", err2);
+                  const msg = String(err2?.message || "");
+                  if (/EMAIL_EXISTS/.test(msg)) {
+                    emailExists = true;
+                    try { if (fns.sendPasswordResetEmail && auth) await fns.sendPasswordResetEmail(auth, item.email); } catch {}
+                  } else {
+                    console.warn("REST 建立 Auth 失敗", err2);
+                  }
                 }
               }
             }
@@ -2947,21 +2983,19 @@ function renderSettingsAccounts() {
             await withRetry(() => fns.deleteDoc(fns.doc(db, "pendingAccounts", pid)));
 
             // 更新前端狀態與 UI
-            // 若成功建立 Auth，覆蓋 users 文件為該 uid
+            // 寫入 users：若有 authUid，直接以其為文件 ID；否則建立新文件
+            let finalUserId = null;
             if (authUid) {
-              try {
-                const ref = fns.doc(db, "users", authUid);
-                await withRetry(() => fns.setDoc(ref, payload, { merge: true }));
-                appState.accounts.push({ id: authUid, ...payload, uid: authUid });
-              } catch (e) {
-                // 若覆蓋失敗，至少保留先前 addDoc 版本
-                appState.accounts.push({ id: userDoc.id, ...payload });
-              }
+              const ref = fns.doc(db, "users", authUid);
+              await withRetry(() => fns.setDoc(ref, payload, { merge: true }));
+              finalUserId = authUid;
             } else {
-              appState.accounts.push({ id: userDoc.id, ...payload });
+              const docRef = await withRetry(() => fns.addDoc(fns.collection(db, "users"), payload));
+              finalUserId = docRef.id;
             }
-              appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
-              renderSettingsContent("帳號");
+            appState.accounts.push({ id: finalUserId, ...payload, uid: authUid || null });
+            appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
+            renderSettingsContent("帳號");
             // 提示狀態：已核准基本資料；若未建立 Auth，提醒管理者後續處理
             if (authCreated) {
               if (newPwd === '000000') {
@@ -2970,7 +3004,11 @@ function renderSettingsAccounts() {
                 alert("核准完成：已加入帳號列表，登入密碼為申請者自訂的密碼。");
               }
             } else {
-              alert("核准完成（部分）：已加入帳號列表，但未建立登入帳號（Auth）。請稍後在帳號列表設定密碼或部署雲端函式。");
+              if (emailExists) {
+                alert("核准完成（使用者 Email 已存在於登入系統）：已寄送重設密碼信，使用者重設後即可登入並自動合併資料。");
+              } else {
+                alert("核准完成（部分）：已加入帳號列表，但未建立登入帳號（Auth）。請稍後在帳號列表設定密碼或部署雲端函式。");
+              }
             }
           } catch (err) {
             alert(`核准帳號失敗：${err?.message || err}`);
@@ -3069,7 +3107,8 @@ let ensureFirebasePromise = null;
   // Firestore Lite：使用 REST 請求，不建立 WebChannel/Listen 連線
   db = getFirestore(firebaseApp);
   // 明確指定雲端函式區域，避免跨區造成呼叫錯誤或 CORS 問題
-  functionsApp = getFunctions ? getFunctions(firebaseApp, "us-central1") : null;
+  const isSecure = (typeof location !== 'undefined') ? (location.protocol === 'https:') : true;
+  functionsApp = (isSecure && getFunctions) ? getFunctions(firebaseApp, "us-central1") : null;
 
   // 將函式指派到外層供事件使用
   fns.signInWithEmailAndPassword = signInWithEmailAndPassword;
@@ -3093,7 +3132,7 @@ let ensureFirebasePromise = null;
   fns.limit = limit;
   // 雲端函式
   fns.functions = functionsApp;
-  fns.httpsCallable = httpsCallable;
+  fns.httpsCallable = functionsApp ? httpsCallable : null;
 
   // 監聽登入狀態（容錯：若網路或授權網域設定不完整，改為顯示登入頁）
   try {
@@ -3102,7 +3141,7 @@ let ensureFirebasePromise = null;
         // 顯示主頁
         loginView.classList.add("hidden");
         appView.classList.remove("hidden");
-        setActiveTab(activeMainTab);
+      setActiveTab('home');
 
       // 先以 Auth 設定頁首使用者資訊（後續以 Firestore 覆蓋）
         const initialDisplayName = user.displayName || user.email || "使用者";
@@ -3136,7 +3175,29 @@ let ensureFirebasePromise = null;
             if (photoFromDoc) homeHeroPhoto.src = photoFromDoc; else if (user.photoURL) homeHeroPhoto.src = user.photoURL; else homeHeroPhoto.removeAttribute("src");
           }
         } else {
-          await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
+          try {
+            const q = query(collection(db, "users"), where("email", "==", user.email || ""));
+            const qs = await getDocs(q);
+            let found = null;
+            qs.forEach((d) => { if (!found) found = d; });
+            if (found) {
+              const data = found.data() || {};
+              role = data.role || role;
+              const displayName = data.name || user.displayName || user.email || "使用者";
+              userNameEl.textContent = `歡迎~ ${displayName}`;
+              if (homeHeaderNameEl) homeHeaderNameEl.textContent = displayName;
+              const photoFromDoc = data.photoUrl || "";
+              if (photoFromDoc) {
+                if (userPhotoEl) userPhotoEl.src = photoFromDoc;
+                if (homeHeroPhoto) homeHeroPhoto.src = photoFromDoc;
+              }
+              await setDoc(userDocRef, { ...data, uid: user.uid }, { merge: true });
+            } else {
+              await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
+            }
+          } catch (_) {
+            await setDoc(userDocRef, { role, name: user.displayName || "使用者", email: user.email || "", createdAt: serverTimestamp() });
+          }
         }
       } catch (err) {
         console.warn("載入使用者文件失敗", err);
@@ -3477,7 +3538,7 @@ let ensureFirebasePromise = null;
           bloodType: d.bloodType || "",
           birthdate: d.birthdate || "",
           licenses: Array.isArray(d.licenses) ? d.licenses : [],
-          role: d.role || "一般",
+          role: d.role || "保全",
           companyId: d.companyId || null,
           companyIds: Array.isArray(d.companyIds) ? d.companyIds : (d.companyId ? [d.companyId] : []),
         serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
@@ -3606,7 +3667,7 @@ let ensureFirebasePromise = null;
   async function loadPendingAccountsFromFirestore() {
     if (!db || !fns.getDocs || !fns.collection) return;
     try {
-      const role = appState.currentUserRole || "一般";
+      const role = appState.currentUserRole || "保全";
       let q = fns.collection(db, "pendingAccounts");
       if (role !== "系統管理員" && appState.currentUserEmail) {
         q = fns.query(q, fns.where("email", "==", appState.currentUserEmail));
@@ -3623,7 +3684,7 @@ let ensureFirebasePromise = null;
         email: d.email || "",
         phone: d.phone || "",
         licenses: Array.isArray(d.licenses) ? d.licenses : [],
-        role: d.role || "一般",
+        role: d.role || "保全",
         companyId: d.companyId || null,
         companyIds: Array.isArray(d.companyIds) ? d.companyIds : (d.companyId ? [d.companyId] : []),
         serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
@@ -3661,10 +3722,16 @@ function applyPagePermissionsForUser(user) {
       case "行政":
         allowed = ["home","checkin","feature"];
         break;
-      case "勤務":
+      case "保全":
         allowed = ["home","checkin","feature"];
         break;
-      default: // 一般
+      case "總幹事":
+      case "秘書":
+      case "清潔":
+      case "機電":
+        allowed = ["home","checkin","feature"];
+        break;
+      default:
         allowed = ["home","checkin","feature"];
         break;
     }
@@ -4419,29 +4486,35 @@ btnStart?.addEventListener("click", async () => {
 // ===== 上班打卡完整流程（位置 → 地圖 → 自拍 → 儲存） =====
 async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
   try {
-    // 1) 依角色載入打卡位置選項
-    const userRole = appState.currentUserRole || "一般";
+    const userRole = appState.currentUserRole || "保全";
     const adminRoles = new Set(["系統管理員", "管理層", "高階主管", "初階主管", "行政"]);
-    // 依使用者帳號與角色找出可選位置
+    const staffRoles = new Set(["總幹事", "秘書", "清潔", "機電", "保全"]);
     let options = [];
-    let sourceType = "company"; // company | community
+    let sourceType = "company";
     const uid = appState.currentUserId || null;
     const userAccount = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
     const isOut = statusKey === "out";
     const isOutFollow = statusKey === "arrive" || statusKey === "leave";
     if (isOut) {
-      // 外出：一律以服務社區清單為主要來源（符合需求），並可自填地點
       const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
       let communities = [];
-      if (allowedCommunityIds && allowedCommunityIds.size > 0) {
-        communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
-      } else if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
-        const coSet = new Set(userAccount.companyIds);
-        communities = appState.communities.filter((c) => coSet.has(c.companyId));
-      } else if (userAccount?.companyId) {
-        communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
+      if (staffRoles.has(userRole)) {
+        if (allowedCommunityIds && allowedCommunityIds.size > 0) {
+          communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+        } else {
+          communities = [];
+        }
       } else {
-        communities = appState.communities.slice();
+        if (allowedCommunityIds && allowedCommunityIds.size > 0) {
+          communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+        } else if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+          const coSet = new Set(userAccount.companyIds);
+          communities = appState.communities.filter((c) => coSet.has(c.companyId));
+        } else if (userAccount?.companyId) {
+          communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
+        } else {
+          communities = appState.communities.slice();
+        }
       }
       communities = communities.slice().sort((a,b)=>{
         const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
@@ -4471,15 +4544,23 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       } else {
         const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
         let communities = [];
-        if (allowedCommunityIds && allowedCommunityIds.size > 0) {
-          communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
-        } else if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
-          const coSet = new Set(userAccount.companyIds);
-          communities = appState.communities.filter((c) => coSet.has(c.companyId));
-        } else if (userAccount?.companyId) {
-          communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
+        if (staffRoles.has(userRole)) {
+          if (allowedCommunityIds && allowedCommunityIds.size > 0) {
+            communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+          } else {
+            communities = [];
+          }
         } else {
-          communities = appState.communities.slice();
+          if (allowedCommunityIds && allowedCommunityIds.size > 0) {
+            communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+          } else if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+            const coSet = new Set(userAccount.companyIds);
+            communities = appState.communities.filter((c) => coSet.has(c.companyId));
+          } else if (userAccount?.companyId) {
+            communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
+          } else {
+            communities = appState.communities.slice();
+          }
         }
         communities = communities.slice().sort((a,b)=>{
           const ao = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
@@ -4498,7 +4579,8 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       if (!cur) { alert("尚未記錄外出，無法進行此打卡"); return; }
       selectedLocation = cur;
     } else {
-    const selectedLocationPromise = new Promise((resolve) => {
+      if (staffRoles.has(userRole) && options.length === 0) { alert("此帳號尚未設定服務社區，請聯絡管理員"); return; }
+      const selectedLocationPromise = new Promise((resolve) => {
       const reasonOptions = [
         { value: '督察', label: '督察' },
         { value: '例會', label: '例會' },
@@ -4584,9 +4666,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
 
     let photoDataUrl = null;
-    if (isOut || isOutFollow) {
-      photoDataUrl = { photo: '', message: '' };
-    } else {
+    {
       // 3) 自拍與留言（浮水印三列）
       // 保證前一個視窗完全關閉，再開啟自拍視窗（避免堆疊競態）
       await new Promise((r) => requestAnimationFrame(r));
@@ -4594,14 +4674,12 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
         let captured = null;
         openModal({
           title: "自拍打卡",
-          fields: [
-            { key: "message", label: "留言（選填，最多 30 字）", type: "text", placeholder: "最多 30 字" },
-          ],
+          fields: [],
           submitText: "確認",
           refreshOnSubmit: false,
-          onSubmit: async (data) => {
+          onSubmit: async () => {
             if (!captured) { alert("請先拍照"); return false; }
-            const msg = (data.message || "").slice(0, 30);
+            const msg = "";
             try {
               const img = new Image();
               img.src = captured;
@@ -4622,7 +4700,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
               const nameElText = (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '');
               const line1 = `${dateStr} ${nameElText || '使用者'}`;
               const line2 = `${hasCoords ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '座標未知'} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
-              const line3 = msg || '';
+              const line3 = '';
               const x = pad; let y = canvas.height - pad*6.5;
               ctx.fillText(line1, x, y); y += pad*2.2;
               ctx.fillText(line2, x, y); y += pad*2.2;
@@ -4638,6 +4716,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
           },
           afterRender: async ({ body }) => {
             try { const modalEl = body?.parentElement; if (modalEl) { modalEl.style.height = '90vh'; modalEl.style.maxHeight = '90vh'; } } catch {}
+            try { const footerEl = modalRoot?.querySelector('.modal-footer'); if (footerEl) footerEl.remove(); } catch {}
             const video = document.createElement('video');
             video.autoplay = true; video.playsInline = true; video.muted = true;
             video.style.width = '100%';
@@ -4664,13 +4743,10 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
                 <path d="M9 7l1.5-2h3L15 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 <circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="2" />
               </svg>`;
-            controls.appendChild(btnSnap);
+            
             body.appendChild(video);
             body.appendChild(controls);
-            const msgRow = body.querySelector('[data-key="message"]')?.parentElement;
-            if (msgRow) { body.removeChild(msgRow); body.appendChild(msgRow); }
-            const submitBtn = modalRoot?.querySelector('.modal-footer .btn.btn-primary');
-            if (submitBtn) { submitBtn.disabled = true; submitBtn.title = '請先拍照'; }
+            const submitBtn = null;
             let stream = null;
             try {
               const leaderRoles = new Set(['系統管理員','管理層','高階主管','初階主管','行政']);
@@ -4695,7 +4771,10 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
                 btnToggle.style.marginLeft = '8px';
                 attachPressInteractions(btnToggle);
                 controls.appendChild(btnToggle);
+                controls.appendChild(btnSnap);
                 btnToggle.addEventListener('click', async () => { facing = (facing === 'environment') ? 'user' : 'environment'; await startStream(); });
+              } else {
+                controls.appendChild(btnSnap);
               }
             } catch (err) {
               const msg = `無法啟用相機：${err?.message || err}`;
@@ -4716,12 +4795,38 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
                 const canvas = document.createElement('canvas'); canvas.width = tw; canvas.height = th;
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tw, th);
+                try {
+                  const pad = Math.floor(th * 0.02);
+                  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                  const barH = Math.max(pad * 3, 28);
+                  ctx.fillRect(0, th - barH, tw, barH);
+                  ctx.fillStyle = '#ffffff';
+                  ctx.textBaseline = 'middle';
+                  let fontSize = Math.max(12, Math.floor(th * 0.025));
+                  const now = new Date();
+                  const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+                  const nameElText = (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, '') || '使用者';
+                  const locStr = (typeof lat === 'number' && typeof lng === 'number') ? `${lat.toFixed(6)},${lng.toFixed(6)}` : '座標未知';
+                  const statusStr = `${statusLabel} ${inRadius ? '正常' : '異常'}`;
+                  const line = `${dateStr} ${nameElText} ${locStr} ${statusStr}`;
+                  // 動態縮放字體以符合寬度
+                  const fit = () => {
+                    ctx.font = `${fontSize}px sans-serif`;
+                    let w = ctx.measureText(line).width;
+                    const maxW = tw - pad * 2;
+                    while (w > maxW && fontSize > 10) { fontSize -= 1; ctx.font = `${fontSize}px sans-serif`; w = ctx.measureText(line).width; }
+                  };
+                  fit();
+                  const x = pad; const y = th - Math.floor(barH / 2);
+                  ctx.fillText(line, x, y);
+                } catch {}
                 const out = canvas.toDataURL('image/jpeg', 0.92);
                 captured = out;
-                if (submitBtn) { submitBtn.disabled = false; submitBtn.title = ''; }
                 try { stream?.getTracks?.().forEach((t) => t.stop()); } catch {}
                 video.srcObject = null; try { video.pause?.(); } catch {}
-                stream = null; video.style.display = 'none';
+                stream = null;
+                resolve({ photo: out, message: '' });
+                closeModal();
               } catch (e) { alert(`拍照失敗：${e?.message || e}`); }
             });
           },
@@ -4796,10 +4901,16 @@ try {
       const summary = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
       if (homeStatusEl) renderHomeStatusText(summary);
       try { const u = auth?.currentUser; if (u?.uid) setLastCheckin(u.uid, { summary, key: statusKey, label: statusLabel }); } catch {}
-      try { alert('您已完成打卡'); const u2 = new SpeechSynthesisUtterance('您已完成打卡'); u2.lang = 'zh-TW'; window.speechSynthesis?.speak(u2); } catch {}
-    } catch (err) {
-      try { alert('您已完成打卡'); const u3 = new SpeechSynthesisUtterance('您已完成打卡'); u3.lang = 'zh-TW'; window.speechSynthesis?.speak(u3); } catch {}
-    }
+  try { alert('您已完成打卡'); const u2 = new SpeechSynthesisUtterance('您已完成打卡'); u2.lang = 'zh-TW'; window.speechSynthesis?.speak(u2); } catch {}
+  try { setActiveTab('home'); } catch {}
+  try { document.querySelectorAll('.modal').forEach((m) => m.remove()); } catch {}
+  try { if (modalRoot) { modalRoot.classList.add('hidden'); modalRoot.innerHTML = ''; } } catch {}
+} catch (err) {
+  try { alert('您已完成打卡'); const u3 = new SpeechSynthesisUtterance('您已完成打卡'); u3.lang = 'zh-TW'; window.speechSynthesis?.speak(u3); } catch {}
+  try { setActiveTab('home'); } catch {}
+  try { document.querySelectorAll('.modal').forEach((m) => m.remove()); } catch {}
+  try { if (modalRoot) { modalRoot.classList.add('hidden'); modalRoot.innerHTML = ''; } } catch {}
+}
   } catch (err) {
     alert(`打卡流程錯誤：${err?.message || err}`);
   }
@@ -4933,7 +5044,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 const size = '640x360';
                 const zoom = 16;
                 const marker = `markers=color:red|${lat},${lon}`;
-                const src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=${zoom}&size=${size}&maptype=roadmap&${marker}&key=${GOOGLE_MAPS_API_KEY}`;
+                const src = `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=${zoom}&size=${size}&scale=2&maptype=roadmap&${marker}&key=${GOOGLE_MAPS_API_KEY}`;
                 openModal({
                   title: '定位地圖',
                   fields: [],
