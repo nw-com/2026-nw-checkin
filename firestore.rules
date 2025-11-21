@@ -70,7 +70,7 @@ service cloud.firestore {
         (request.resource.data.pagePermissions == null || request.resource.data.pagePermissions is list) &&
         request.resource.data.role == '一般' &&
         request.resource.data.status == '待審核' &&
-        request.resource.data.createdAt is timestamp;
+        (request.resource.data.createdAt == null || request.resource.data.createdAt is timestamp || request.resource.data.createdAt is string);
 
       allow read: if isAdmin();
       allow update, delete: if isAdmin();

@@ -724,6 +724,23 @@ function getLastCheckin(uid) {
   } catch { return null; }
 }
 
+function setCurrentOutTrip(uid, payload) {
+  try {
+    if (!uid) return;
+    const key = `currentOutTrip:${uid}`;
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {}
+}
+
+function getCurrentOutTrip(uid) {
+  try {
+    if (!uid) return null;
+    const key = `currentOutTrip:${uid}`;
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : null;
+  } catch { return null; }
+}
+
 async function getIdToken() {
   try {
     const u = auth?.currentUser;
@@ -1422,9 +1439,25 @@ async function importAccountsFromXLSX(file) {
           ],
         onSubmit: async (d) => {
           try {
+            let photoUrlStr = "";
+            try {
+              const f = d.photoUrl;
+              if (f && typeof File !== 'undefined' && f instanceof File) {
+                photoUrlStr = await new Promise((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(String(reader.result || ''));
+                  reader.onerror = () => resolve('');
+                  reader.readAsDataURL(f);
+                });
+              } else if (typeof f === 'string') {
+                photoUrlStr = f;
+              } else {
+                photoUrlStr = '';
+              }
+            } catch { photoUrlStr = ''; }
             // 密碼僅用於顯示，不寫入 Firestore
             const pendingPayload = {
-              photoUrl: d.photoUrl || "",
+              photoUrl: photoUrlStr || "",
               name: d.name || "",
               title: d.title || "",
               email: d.email || "",
@@ -1432,27 +1465,36 @@ async function importAccountsFromXLSX(file) {
               licenses: Array.isArray(d.licenses) ? d.licenses : [],
               role: "一般",
               companyId: (Array.isArray(d.companyIds) && d.companyIds.length) ? d.companyIds[0] : null,
-              companyIds: Array.isArray(d.companyIds) ? d.companyIds : [],
               serviceCommunities: [],
               status: "待審核",
             };
-          if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
-            const docRef = await fns.addDoc(fns.collection(db, "pendingAccounts"), {
-              ...pendingPayload,
-              createdAt: fns.serverTimestamp(),
-            });
-            appState.pendingAccounts.push({ id: docRef.id, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
-          } else {
-            // Firestore 尚未初始化時，先寫入前端狀態
-            appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "", createdAt: new Date().toISOString() });
+            if (db && fns.addDoc && fns.collection && fns.serverTimestamp) {
+              const fsPayload = {
+                photoUrl: pendingPayload.photoUrl,
+                name: pendingPayload.name,
+                title: pendingPayload.title,
+                email: pendingPayload.email,
+                phone: pendingPayload.phone,
+                licenses: pendingPayload.licenses,
+                role: pendingPayload.role,
+                companyId: pendingPayload.companyId,
+                serviceCommunities: pendingPayload.serviceCommunities,
+                status: pendingPayload.status,
+                createdAt: fns.serverTimestamp(),
+              };
+              const docRef = await fns.addDoc(fns.collection(db, "pendingAccounts"), fsPayload);
+              appState.pendingAccounts.push({ id: docRef.id, ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "" });
+            } else {
+              // Firestore 尚未初始化時，先寫入前端狀態
+              appState.pendingAccounts.push({ id: id(), ...pendingPayload, password: d.password || "", passwordConfirm: d.passwordConfirm || "", createdAt: new Date().toISOString() });
+            }
+            renderSettingsContent("帳號");
+            return true;
+          } catch (err) {
+            alert(`提交帳號申請失敗：${err?.message || err}`);
+            return false;
           }
-          renderSettingsContent("帳號");
-          return true;
-        } catch (err) {
-          alert(`提交帳號申請失敗：${err?.message || err}`);
-          return false;
-        }
-      },
+        },
     });
   });
 }
@@ -4225,6 +4267,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     const uid = appState.currentUserId || null;
     const userAccount = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
     const isOut = statusKey === "out";
+    const isOutFollow = statusKey === "arrive" || statusKey === "leave";
     if (isOut) {
       // 外出：一律以服務社區清單為主要來源（符合需求），並可自填地點
       const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
@@ -4288,7 +4331,13 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       }
     }
 
-    const selectedLocation = await new Promise((resolve) => {
+    let selectedLocation = null;
+    if (isOutFollow) {
+      const cur = getCurrentOutTrip(uid);
+      if (!cur) { alert("尚未記錄外出，無法進行此打卡"); return; }
+      selectedLocation = cur;
+    } else {
+    const selectedLocationPromise = new Promise((resolve) => {
       const reasonOptions = [
         { value: '督察', label: '督察' },
         { value: '例會', label: '例會' },
@@ -4357,7 +4406,11 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
       const cancelBtn = modalRoot?.querySelector('.modal-footer .btn:not(.btn-primary)');
       cancelBtn?.addEventListener('click', () => resolve(null));
     });
-    if (!selectedLocation) return; // 使用者取消
+    selectedLocation = await selectedLocationPromise;
+    if (!selectedLocation) return;
+    }
+
+    if (isOut) { try { setCurrentOutTrip(uid, selectedLocation); } catch {} }
 
     // 2) 地圖定位檢視（顯示目前位置與打卡範圍），並取得目前位置座標
     const viewerRes = await openCheckinMapViewer({
@@ -4370,7 +4423,7 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
     const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
 
     let photoDataUrl = null;
-    if (isOut) {
+    if (isOut || isOutFollow) {
       photoDataUrl = { photo: '', message: '' };
     } else {
       // 3) 自拍與留言（浮水印三列）
@@ -4556,7 +4609,7 @@ try {
         deviceModel: getLocalDeviceModel(),
         createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
       };
-      if (isOut && selectedLocation && selectedLocation.reason) { payload.reason = selectedLocation.reason; }
+      if ((statusKey === 'out' || statusKey === 'arrive' || statusKey === 'leave') && selectedLocation && selectedLocation.reason) { payload.reason = selectedLocation.reason; }
       let saved = false;
       if (db && fns.addDoc && fns.collection) {
         try { await fns.addDoc(fns.collection(db, "checkins"), payload); saved = true; } catch {}
