@@ -7,10 +7,10 @@ window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
   apiKey: "AIzaSyDdetnrACoNTSV3ZqFBPOSfnZzRtmk5fk8",
   authDomain: "nw-checkin.firebaseapp.com",
   projectId: "nw-checkin",
-  storageBucket: "nw-checkin.appspot.com",
+  storageBucket: "nw-checkin.firebasestorage.app",
   messagingSenderId: "520938520545",
   appId: "1:520938520545:web:fb32a42eb1504aab041ca0",
-  measurementId: "G-G6M6NGBC03",
+  measurementId: "G-G6M6NGBC03"
 };
 
 // Google Maps API Key（來自使用者提供）
