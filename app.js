@@ -1066,6 +1066,17 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
       },
       afterRender: async ({ body, footer }) => {
         const maps = await ensureGoogleMaps();
+        const btnRelocate = document.createElement("button");
+        btnRelocate.className = "btn btn-green";
+        btnRelocate.textContent = "重新定位";
+        btnRelocate.style.borderRadius = "0";
+        btnRelocate.style.display = "flex";
+        btnRelocate.style.alignItems = "center";
+        btnRelocate.style.justifyContent = "center";
+        btnRelocate.style.padding = "0";
+        btnRelocate.style.width = "100%";
+        attachPressInteractions(btnRelocate);
+        body.appendChild(btnRelocate);
         const mapBox = document.createElement("div");
         mapBox.style.width = "100%";
         mapBox.style.height = "360px";
@@ -1140,20 +1151,6 @@ function openCheckinMapViewer({ targetName = "", targetCoords = "", targetRadius
           info.textContent = "此裝置不支援定位";
         }
 
-        // 重新定位按鈕（不可編輯座標/地址/半徑）
-        const btnRelocate = document.createElement("button");
-        btnRelocate.className = "btn btn-green";
-        btnRelocate.textContent = "重新定位";
-        btnRelocate.style.borderRadius = "0";
-        btnRelocate.style.height = "";
-        btnRelocate.style.fontSize = "";
-        btnRelocate.style.display = "flex";
-        btnRelocate.style.alignItems = "center";
-        btnRelocate.style.justifyContent = "center";
-        btnRelocate.style.padding = "0";
-        btnRelocate.style.width = "100%";
-        attachPressInteractions(btnRelocate);
-        footer.insertBefore(btnRelocate, footer.querySelector(".btn.btn-primary"));
         btnRelocate.addEventListener("click", () => {
           if ("geolocation" in navigator) {
             info.textContent = "定位中…";
@@ -3113,31 +3110,70 @@ let ensureFirebasePromise = null;
       { value: '離開', label: '離開' },
       { value: '返回', label: '返回' },
     ];
-    let defaultPlace = '';
-    try {
-      const uid = appState.currentUserId || null;
-      const acc = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
-      const companyName = acc?.companyId ? (appState.companies.find((c) => c.id === acc.companyId)?.name || '') : '';
-      defaultPlace = companyName || '';
-    } catch {}
+    // 依角色與帳號取得打卡位置選項（與上班打卡位置相同資料來源）
+    const userRole = appState.currentUserRole || '一般';
+    const adminRoles = new Set(['系統管理員', '管理層', '高階主管', '初階主管', '行政']);
+    const uid = appState.currentUserId || null;
+    const userAccount = uid ? (appState.accounts.find((a) => a.id === uid) || null) : null;
+    let placeOptions = [];
+    let sourceType = 'company';
+    if (adminRoles.has(userRole)) {
+      if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+        const set = new Set(userAccount.companyIds);
+        const list = appState.companies.filter((c) => set.has(c.id)).slice().sort((a,b)=>{
+          const ao = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
+          const bo = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
+          if (ao !== bo) return ao - bo;
+          return String(a.name||'').localeCompare(String(b.name||''), 'zh-Hant');
+        });
+        placeOptions = list.map((c) => ({ value: c.id, label: c.name }));
+      } else if (userAccount?.companyId) {
+        const co = appState.companies.find((c) => c.id === userAccount.companyId) || null;
+        placeOptions = co ? [{ value: co.id, label: co.name }] : [];
+      }
+      if (!placeOptions.length) placeOptions = optionList(appState.companies);
+      sourceType = 'company';
+    } else {
+      const allowedCommunityIds = (userAccount && Array.isArray(userAccount.serviceCommunities)) ? new Set(userAccount.serviceCommunities) : null;
+      let communities = [];
+      if (allowedCommunityIds && allowedCommunityIds.size > 0) {
+        communities = appState.communities.filter((c) => allowedCommunityIds.has(c.id));
+      } else if (userAccount && Array.isArray(userAccount.companyIds) && userAccount.companyIds.length > 0) {
+        const coSet = new Set(userAccount.companyIds);
+        communities = appState.communities.filter((c) => coSet.has(c.companyId));
+      } else if (userAccount?.companyId) {
+        communities = appState.communities.filter((c) => c.companyId === userAccount.companyId);
+      } else {
+        communities = appState.communities.slice();
+      }
+      communities = communities.slice().sort((a,b)=>{
+        const ao = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
+        const bo = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return String(a.name||'').localeCompare(String(b.name||''), 'zh-Hant');
+      });
+      placeOptions = communities.map((c) => ({ value: c.id, label: c.name }));
+      sourceType = 'community';
+    }
     openModal({
       title: '補卡申請',
       fields: [
-        { key: 'place', label: '打卡地點', type: 'text' },
+        { key: 'place', label: '打卡地點', type: 'select', options: placeOptions },
         { key: 'status', label: '狀態', type: 'select', options: statusOptions },
         { key: 'datetime', label: '日期時間', type: 'datetime-local', placeholder: '請選擇日期時間' },
       ],
-      initial: { place: defaultPlace, status: '上班', datetime: '' },
+      initial: { place: (placeOptions[0]?.value || ''), status: '上班', datetime: '' },
       submitText: '送出',
       refreshOnSubmit: false,
       onSubmit: async (data) => {
         try {
           await ensureFirebase();
           const user = auth?.currentUser || null;
+          const selected = placeOptions.find((o) => String(o.value) === String(data.place || '')) || null;
           const payload = {
             uid: user?.uid || null,
             name: (homeHeaderNameEl?.textContent || '').replace(/^歡迎~\s*/, ''),
-            place: String(data.place || ''),
+            place: selected ? (selected.label || '') : '',
             status: String(data.status || ''),
             datetime: String(data.datetime || ''),
             createdAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date().toISOString(),
@@ -4300,24 +4336,40 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
               <path d="M9 7l1.5-2h3L15 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
               <circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="2" />
             </svg>`;
-          const preview = document.createElement('img');
-          preview.style.width = '100%';
-          preview.style.aspectRatio = '4 / 6';
-          preview.style.objectFit = 'cover';
-          preview.style.marginTop = '8px';
-          preview.alt = '預覽照片';
           controls.appendChild(btnSnap);
           body.appendChild(video);
           body.appendChild(controls);
-          body.appendChild(preview);
+          const msgRow = body.querySelector('[data-key="message"]')?.parentElement;
+          if (msgRow) { body.removeChild(msgRow); body.appendChild(msgRow); }
           // 讓「確認」按鈕在未拍照前不可用
           const submitBtn = modalRoot?.querySelector('.modal-footer .btn.btn-primary');
           if (submitBtn) { submitBtn.disabled = true; submitBtn.title = '請先拍照'; }
           let stream = null;
           try {
-            // 不限定鏡頭，優先確保任一相機可開啟
-            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-            video.srcObject = stream;
+            const leaderRoles = new Set(['系統管理員','管理層','高階主管','初階主管','行政']);
+            const role = appState.currentUserRole || '一般';
+            let facing = leaderRoles.has(role) ? 'environment' : 'user';
+            const startStream = async () => {
+              try {
+                if (stream) { try { stream.getTracks()?.forEach((t)=>t.stop()); } catch {} }
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing }, audio: false });
+                video.srcObject = stream;
+              } catch (err) {
+                const msg = `無法啟用相機：${err?.message || err}`;
+                const warn = document.createElement('div'); warn.textContent = msg; warn.style.color = '#b00020'; warn.style.marginTop = '8px'; body.appendChild(warn);
+              }
+            };
+            await startStream();
+            if (leaderRoles.has(role)) {
+              const btnToggle = document.createElement('button');
+              btnToggle.className = 'btn btn-darkgrey';
+              btnToggle.textContent = '切換鏡頭';
+              btnToggle.style.borderRadius = '0';
+              btnToggle.style.marginLeft = '8px';
+              attachPressInteractions(btnToggle);
+              controls.appendChild(btnToggle);
+              btnToggle.addEventListener('click', async () => { facing = (facing === 'environment') ? 'user' : 'environment'; await startStream(); });
+            }
           } catch (err) {
             const msg = `無法啟用相機：${err?.message || err}`;
             const warn = document.createElement('div'); warn.textContent = msg; warn.style.color = '#b00020'; warn.style.marginTop = '8px'; body.appendChild(warn);
@@ -4347,7 +4399,6 @@ async function startCheckinFlow(statusKey = "work", statusLabel = "上班") {
               // 將影片畫面裁切中心區塊，輸出為 4:6
               ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tw, th);
               captured = canvas.toDataURL('image/jpeg', 0.92);
-              preview.src = captured;
               if (submitBtn) { submitBtn.disabled = false; submitBtn.title = ''; }
               // 拍照完成後立即關閉相機並隱藏影片預覽
               try { stream?.getTracks?.().forEach((t) => t.stop()); } catch {}
@@ -4422,6 +4473,7 @@ try {
       const summary = `${dateStr} ${selectedLocation.name} ${statusLabel} ${inRadius ? '正常' : '異常'}`;
       if (homeStatusEl) renderHomeStatusText(summary);
       try { const u = auth?.currentUser; if (u?.uid) setLastCheckin(u.uid, { summary, key: statusKey, label: statusLabel }); } catch {}
+      try { alert('您已完成打卡'); const u2 = new SpeechSynthesisUtterance('您已完成打卡'); u2.lang = 'zh-TW'; window.speechSynthesis?.speak(u2); } catch {}
     } catch (err) {
       alert(`打卡資料寫入失敗：${err?.message || err}`);
     }
