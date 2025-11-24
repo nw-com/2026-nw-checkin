@@ -35,7 +35,6 @@ body {
 .brand-title { font-size: 20px; font-weight: 700; }
 .brand-subtitle { font-size: 13px; color: #6b7280; }
 .btn { appearance: none; border: none; background: #111827; color: #ffffff; padding: 12px 16px; border-radius: 10px; font-size: 15px; cursor: pointer; }
-.btn-darkgrey { background: #333333; color: #ffffff; }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 /* 主按鈕 hover/active/pressed 效果 */
 .btn:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 6px 16px rgba(0,0,0,0.12); transform: translateY(-1px); }
@@ -73,7 +72,7 @@ body {
 .app-header {
   position: fixed; top: 0; left: 0; right: 0; height: 8vh; min-height: 48px;
   display: flex; align-items: center; justify-content: space-between; padding: 0 14px;
-  background: #CC0000; color: #ffffff; border-bottom: none; z-index: 1000;
+  background: #FF0000; color: #ffffff; border-bottom: none; z-index: 1000;
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .header-icon { width: 28px; height: 28px; display: grid; place-items: center; }
@@ -168,13 +167,6 @@ button[disabled] { cursor: not-allowed; }
 .form-row { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; align-items: center; }
 .form-row .label { margin: 0; }
 .form-row .input { width: 100%; }
-.form-row select.input {
-  -webkit-appearance: auto;
-  -moz-appearance: auto;
-  appearance: auto;
-  pointer-events: auto;
-  background-color: #ffffff;
-}
 .help { font-size: 12px; color: #6b7280; }
 
 .app-footer {
@@ -186,9 +178,6 @@ button[disabled] { cursor: not-allowed; }
 /* 頁尾分頁按鈕 hover/active/pressed 效果 */
 .tab-btn:hover { background: #f3f4f6; }
 .tab-btn:active, .tab-btn.pressed { background: #e5e7eb; transform: translateY(1px); }
-
-/* 讓角色權限隱藏能壓過 .tab-btn 的 display 設定 */
-.app-footer .tab-btn.hidden { display: none !important; }
 
 /* 頁尾圖示 */
 .tab-icon { width: 22px; height: 22px; color: currentColor; }
@@ -228,7 +217,7 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .home-mid-stack {
   height: 50vh;
   display: grid;
-  grid-template-rows: 16vh 8vh 6vh 6vh; /* F, G, H, I */
+  grid-template-rows: 16vh 8vh 6vh 6vh 10vh;
   align-items: stretch;
   gap: 8px;
 }
@@ -245,24 +234,18 @@ button[disabled] { cursor: not-allowed; }
   align-items: center;
   justify-content: center;
 }
-.home-layout .home-mid-stack .row-h .btn { width: 100%; height: 5vh; padding: 0 4vh; font-size: 2.8vh; font-weight: 300; border-radius: 0; }
-.home-layout .home-mid-stack .row-i .btn { flex: 1; height: 5vh; padding: 0 4vh; font-size: 2.8vh; font-weight: 300; border-radius: 0; margin: 0; }
+.home-layout .home-mid-stack .row-h .btn { width: 100%; height: 6vh; padding: 0 4vh; font-size: 3.2vh; font-weight: 300; border-radius: 0; }
+.home-layout .home-mid-stack .row-i .btn { flex: 1; height: 6vh; padding: 0 4vh; font-size: 3.2vh; font-weight: 300; border-radius: 0; margin: 0; }
 .home-layout .home-mid-stack .row-g {
   width: 100%;
   margin-inline: auto;
-  background: #f3f4f6;
-  border: none;
-  border-radius: 0;
+  background: #f3f4f6; /* 淺灰背景 */
+  border: 1px solid #e5e7eb; /* 淺灰邊框 */
+  border-radius: 8px;
   padding: 4px 8px;
   box-sizing: border-box;
 }
-.home-layout .home-mid-stack .status-text {
-  font-size: 2vh;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.home-layout .home-mid-stack .status-text { font-size: 4vh; font-weight: 700; }
 .home-layout .home-mid-stack .btn {
   height: 4.2vh;
   padding: 0 2vh;
@@ -278,35 +261,18 @@ button[disabled] { cursor: not-allowed; }
 .btn-blue { background: #1e88e5; }
 .btn-darkgreen { background: #0b8043; }
 .btn-orange { background: #f57c00; }
-.btn-teal { background: #26a69a; }
 .btn-purple { background: #8e24aa; }
 /* 灰色按鈕（側邊） */
 .btn-grey { background: #bfbfbf; color: #222; }
 
 /* 狀態顏色對應（文字與大照片邊框） */
-#homeStatus .status-label.work { color: #0f9d58; }
-#homeStatus .status-flag.bad { background: #CC0000; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; line-height: 1.4; }
-.status-flag.bad { background: #CC0000; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; line-height: 1.4; }
-/* 通用狀態標籤顏色（列表卡片等處） */
-.status-label.work { color: #0f9d58; }
-.status-flag.good { background: #0f9d58; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 12px; display: inline-block; line-height: 1.4; }
-.status-label.off { color: #d93025; }
-.status-label.out { color: #1e88e5; }
-.status-label.arrive { color: #1e88e5; }
-.status-label.leave { color: #1e88e5; }
-.status-label.return { color: #0b8043; }
-.status-label.bad { color: #CC0000; }
-.status-label.leave-request { color: #f57c00; }
-/* 預設狀態標籤不指定顏色，依父層繼承 */
-.status-label { color: inherit; }
-/* 首頁狀態列背景色（依狀態） */
-body.status-work .home-layout .home-mid-stack .row-g { background: #e6f4ea; }
-body.status-off .home-layout .home-mid-stack .row-g { background: #fce8e6; }
-body.status-out .home-layout .home-mid-stack .row-g { background: #e8f0fe; }
-body.status-arrive .home-layout .home-mid-stack .row-g { background: #e8f0fe; }
-body.status-leave .home-layout .home-mid-stack .row-g { background: #e8f0fe; }
-body.status-return .home-layout .home-mid-stack .row-g { background: #e9f7ef; }
-body.status-leave-request .home-layout .home-mid-stack .row-g { background: #fff4e6; }
+body.status-work #homeStatus { color: #0f9d58; }
+body.status-off #homeStatus { color: #d93025; }
+body.status-out #homeStatus { color: #1e88e5; }
+body.status-arrive #homeStatus { color: #1e88e5; }
+body.status-leave #homeStatus { color: #1e88e5; }
+body.status-return #homeStatus { color: #0b8043; }
+body.status-leave-request #homeStatus { color: #f57c00; }
 
 /* 大照片邊框顏色（依狀態）與動畫效果 */
 .home-layout .home-hero-photo {
@@ -481,16 +447,3 @@ body.status-leave-request { --hero-pulse-rgb: 245,124,0; }
 .pick-day.work-selected { background: #dbe9ff; border-color: #bcd3ff; }
 .pick-day.duty-selected { background: #fff3a5; border-color: #ffe58f; }
 .roster-cal-duty { display: inline-block; margin-top: 4px; padding: 2px 6px; font-size: 12px; color: #6b4e00; background: #fff3a5; border: 1px solid #ffe58f; border-radius: 999px; }
-/* 打卡紀錄卡片分隔樣式 */
-.record-card { background: #f3f4f6; padding: 8px; margin: 8px 0; border-radius: 0; }
-.record-actions { display: flex; gap: 8px; }
-.record-actions .btn { flex: 1; }
-/* 面板內按鈕統一直角 */
-.panel .btn { border-radius: 0; }
-.btn { border-radius: 0; }
-#modalRoot .input { border: none; text-align: center; }
-#modalRoot select.input { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: transparent; pointer-events: auto; }
-#modalRoot select.input[data-key='role'] { pointer-events: none; }
-.app-header .home-map-overlay { position: absolute; inset: 0; z-index: 1; opacity: 0.40; pointer-events: none; }
-.app-header .home-map-overlay img { width: 100%; height: 100%; object-fit: cover; }
-#modalRoot .form-row .label { display: block; width: 100%; background: #EEEEEE; font-weight: 700; text-align: center; padding: 8px; }
