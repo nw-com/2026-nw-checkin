@@ -264,6 +264,16 @@ function updateHomeClockOnce() {
   const now = nowInTZ('Asia/Taipei');
   if (homeTimeEl) homeTimeEl.textContent = `${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`;
   if (homeDateEl) homeDateEl.textContent = `${formatDateYYYYMMDD(now)} (${weekdayZH(now)})`;
+  try {
+    const h = now.getHours(); const m = now.getMinutes(); const s = now.getSeconds();
+    if (h === 0 && m === 0 && !appState.midnightResetDone) {
+      if (homeStatusEl) homeStatusEl.textContent = '今日尚未打卡';
+      appState.midnightResetDone = true;
+    }
+    if (h === 0 && m === 1 && appState.midnightResetDone) {
+      appState.midnightResetDone = false;
+    }
+  } catch {}
 }
 async function startHomeClock() {
   try { await ensureNetworkTime(); } catch {}
@@ -332,10 +342,35 @@ function getTodayRosterStatusForUser(uid) {
     const now = nowInTZ('Asia/Taipei');
     const ymd = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     const plans = appState.rosterPlans || {};
-  const plan = (plans[u] || {})[ymd] || null;
-  if (plan && plan.status) return String(plan.status);
-  return defaultRosterStatusForDate(now);
-} catch { return ''; }
+    const plan = (plans[u] || {})[ymd] || null;
+    const norm = (s) => {
+      const v = String(s||'');
+      if (v.includes('值班')) return '值班日';
+      if (v.includes('休假')) return '休假日';
+      if (v.includes('公休')) return '特休日';
+      if (v.includes('請假')) return '請假日';
+      return v || '上班日';
+    };
+    let base = plan && plan.status ? norm(plan.status) : defaultRosterStatusForDate(now);
+    // 週五預設特休日（排除國定/值班/請假）
+    if (now.getDay() === 5 && !isTWNationalHoliday(now) && base !== '值班日' && base !== '請假日') base = '特休日';
+    // 當日請假覆蓋
+    try {
+      const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1);
+      const list = Array.isArray(appState.leaveRequests) ? appState.leaveRequests : JSON.parse(localStorage.getItem('leaveRequests')||'[]');
+      const hasLeave = list.some((r) => {
+        const ru = String(r.uid||''); if (ru !== String(u||'')) return false;
+        const st = String(r.status||''); if (st && st !== '核准') return false;
+        const s = r.startAt instanceof Date ? r.startAt : (typeof r.startAt === 'string' ? new Date(r.startAt) : null);
+        const e = r.endAt instanceof Date ? r.endAt : (typeof r.endAt === 'string' ? new Date(r.endAt) : null);
+        if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return false;
+        return !(e < dayStart || s >= dayEnd);
+      });
+      if (hasLeave) base = '請假日';
+    } catch {}
+    return base;
+  } catch { return ''; }
 }
 
 function renderHomeRosterLabel() {
@@ -347,7 +382,7 @@ function renderHomeRosterLabel() {
     fRow.classList.remove('hidden');
     fRow.style.display = 'grid';
     fRow.style.placeItems = 'end center';
-    const cls = status === '值班日' ? 'arrive' : (status === '休假日' ? 'off' : 'work');
+    const cls = (status === '值班日') ? 'arrive' : ((status === '休假日' || status === '特休日') ? 'off' : (status === '請假日' ? 'leave-request' : 'work'));
     fRow.innerHTML = `<div class="status-text" style="text-align:center;"><span class="status-label ${cls}">${status}</span></div>`;
   } catch {}
 }
@@ -3608,7 +3643,12 @@ let ensureFirebasePromise = null;
           let dt = null;
           if (val && typeof val.toDate === 'function') dt = val.toDate(); else if (typeof val === 'string') dt = new Date(val);
           if (!dt) return;
-          if (!best || dt > best.dt) best = { data: d, dt };
+          const nowTZ = nowInTZ('Asia/Taipei');
+          const dayStart = new Date(nowTZ.getFullYear(), nowTZ.getMonth(), nowTZ.getDate());
+          const dayEnd = new Date(nowTZ.getFullYear(), nowTZ.getMonth(), nowTZ.getDate()+1);
+          if (dt >= dayStart && dt < dayEnd) {
+            if (!best || dt > best.dt) best = { data: d, dt };
+          }
         });
         if (best) {
           const d = best.data; const dt = best.dt;
@@ -3619,7 +3659,7 @@ let ensureFirebasePromise = null;
           if (homeStatusEl) renderHomeStatusText(summary);
           setLastCheckin(user.uid, { summary, key: mapLabelToKey(label), label });
         } else {
-          if (homeStatusEl) homeStatusEl.textContent = '';
+          if (homeStatusEl) homeStatusEl.textContent = '今日尚未打卡';
         }
       } catch {}
 
@@ -4231,7 +4271,19 @@ function hasFullAccessToTab(tab) {
     homeMapOverlay?.classList.toggle("hidden", false);
     // 首頁：A/B/C/D/E 堆疊顯示切換
     homeHeaderStack?.classList.toggle("hidden", tab !== "home");
-    if (tab === "home") { startHomeClock(); renderHomeRosterLabel(); } else { stopHomeClock(); }
+    if (tab === "home") {
+      startHomeClock();
+      renderHomeRosterLabel();
+      try {
+        const uid = appState.currentUserId || auth?.currentUser?.uid || null;
+        if (uid) {
+          const now = nowInTZ('Asia/Taipei');
+          ensureMonthlyLeavesFor(uid, now.getFullYear(), now.getMonth()).then(() => {
+            try { renderHomeRosterLabel(); } catch {}
+          }).catch(() => {});
+        }
+      } catch {}
+    } else { stopHomeClock(); }
     // 所有分頁皆更新定位地圖，僅在頁面可見時執行
     startGeoRefresh();
     if (!same) renderSubTabs(tab);

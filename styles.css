@@ -468,7 +468,7 @@ body.status-leave-request { --hero-pulse-rgb: 245,124,0; }
 
 /* 首頁：A/B/C/D/E 堆疊容器（置於地圖上方） */
 .home-layout .home-header-stack {
-  position: absolute; inset: 0; height: 40vh; pointer-events: none; z-index: 1200;
+  position: absolute; inset: 0; height: 40vh; pointer-events: none; z-index: 2300;
   display: grid;
   grid-template-rows: 5vh 5vh 7vh 7vh 16vh;
 }
