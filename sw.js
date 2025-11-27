@@ -1,34 +1,27 @@
-const CACHE_NAME = 'nw-checkin-v1';
-const PRECACHE = ['/', '/index.html', '/app.js', '/styles.css'];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE))
-  );
-  self.skipWaiting();
+const CACHE_NAME = 'nw-patrol-v2';
+const ASSETS = [
+  'index.html',
+  'styles.css',
+  'app.js',
+  'manifest.webmanifest',
+  'logo.svg'
+];
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve()))
-    ))
-  );
-  self.clients.claim();
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))));
 });
-
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy)).catch(() => {});
-          return resp;
-        })
-        .catch(() => caches.match('/index.html'));
-    })
-  );
+self.addEventListener('fetch', e => {
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET') return;
+  if (ASSETS.some(a=>url.pathname.endsWith(a))) {
+    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(res => {
+      const copy = res.clone();
+      caches.open(CACHE_NAME).then(c => c.put(e.request, copy));
+      return res;
+    })));
+    return;
+  }
+  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
 });
