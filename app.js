@@ -398,14 +398,24 @@ function getTodayRosterStatusForUser(uid) {
     const u = String(uid || appState.currentUserId || '').trim();
     if (!u) return '';
     const now = nowInTZ('Asia/Taipei');
+    const curId = appState.currentUserId || null;
+    const acc0 = (appState.accounts||[]).find((a) => a.id === curId || a.uid === u) || null;
+    const created0 = acc0?.createdAt || null;
+    const act = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
+    if (act && now < new Date(act.getFullYear(), act.getMonth(), act.getDate(), 23, 59, 59, 999)) return '';
     const ymd = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     const plans = appState.rosterPlans || {};
-    const plan = (plans[u] || {})[ymd] || null;
+    // 班表多鍵查找（uid、當前id、帳號id/uid/姓名/email）
+    const acc = acc0;
+    const candidates = [u, curId, acc?.id, acc?.uid, acc?.name, acc?.email].filter((x)=> !!x).map((x)=> String(x));
+    let plan = null;
+    for (const k of candidates) { const p = plans?.[k]?.[ymd] || null; if (p) { plan = p; break; } }
     const norm = (s) => {
       const v = String(s||'');
       if (v.includes('值班')) return '值班日';
       if (v.includes('休假')) return '休假日';
       if (v.includes('公休')) return '特休日';
+      if (v.includes('特休')) return '特休日';
       if (v.includes('請假')) return '請假日';
       return v || '上班日';
     };
@@ -418,7 +428,7 @@ function getTodayRosterStatusForUser(uid) {
       const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1);
       const monthKey = `${now.getFullYear()}-${now.getMonth()+1}`;
       const cached = appState.rosterMonthLeaves?.[u]?.[monthKey] || [];
-      let hasLeave = Array.isArray(cached) && cached.length ? cached.some((r) => !(r.edt < dayStart || r.sdt >= dayEnd)) : false;
+      let hasLeave = Array.isArray(cached) && cached.length ? cached.some((r) => !(r.edt <= dayStart || r.sdt >= dayEnd)) : false;
       if (!hasLeave) {
         const list = Array.isArray(appState.leaveRequests) ? appState.leaveRequests : JSON.parse(localStorage.getItem('leaveRequests')||'[]');
         hasLeave = list.some((r) => {
@@ -427,7 +437,7 @@ function getTodayRosterStatusForUser(uid) {
           const s = r.startAt instanceof Date ? r.startAt : (typeof r.startAt === 'string' ? new Date(r.startAt) : null);
           const e = r.endAt instanceof Date ? r.endAt : (typeof r.endAt === 'string' ? new Date(r.endAt) : null);
           if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return false;
-          return !(e < dayStart || s >= dayEnd);
+          return !(e <= dayStart || s >= dayEnd);
         });
       }
       if (hasLeave) base = '請假日';
@@ -446,6 +456,99 @@ function renderHomeRosterLabel() {
     fRow.classList.remove('hidden');
     const cls = (status === '值班日') ? 'arrive' : ((status === '休假日' || status === '特休日') ? 'off' : (status === '請假日' ? 'leave-request' : 'work'));
     labelEl.innerHTML = `<div class="status-text" style="text-align:center;"><span class="status-label ${cls}">${status}</span></div>`;
+  } catch {}
+}
+
+async function renderHomeRosterLabelAsync() {
+  try {
+    const fRow = document.querySelector('.row-f');
+    const labelEl = document.getElementById('homeRosterLabel');
+    if (!fRow || !labelEl) return;
+    const uid = appState.currentUserId || auth?.currentUser?.uid || '';
+    const status = await getTodayRosterStatusForUserAsync(uid);
+    if (!status) { labelEl.textContent = ''; fRow.classList.remove('hidden'); return; }
+    fRow.classList.remove('hidden');
+    const cls = (status === '值班日') ? 'arrive' : ((status === '休假日' || status === '特休日') ? 'off' : (status === '請假日' ? 'leave-request' : 'work'));
+    labelEl.innerHTML = `<div class="status-text" style="text-align:center;"><span class="status-label ${cls}">${status}</span></div>`;
+  } catch {}
+}
+
+async function renderHomeImmediate() {
+  try {
+    await ensureFirebase();
+    const uid = appState.currentUserId || auth?.currentUser?.uid || '';
+    if (!uid) return;
+    const nowTZ = nowInTZ('Asia/Taipei');
+    const curId = appState.currentUserId || null;
+    const acc0 = (appState.accounts||[]).find((a) => a.id === curId || a.uid === uid) || null;
+    const created0 = acc0?.createdAt || null;
+    const act = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
+    if (act && nowTZ < new Date(act.getFullYear(), act.getMonth(), act.getDate(), 23, 59, 59, 999)) {
+      const fRow = document.querySelector('.row-f'); const labelEl = document.getElementById('homeRosterLabel');
+      if (homeStatusEl) homeStatusEl.textContent = '今日尚未打卡';
+      if (fRow && labelEl) { labelEl.textContent = ''; fRow.classList.remove('hidden'); }
+      return;
+    }
+    const dayStart = new Date(nowTZ.getFullYear(), nowTZ.getMonth(), nowTZ.getDate());
+    const dayEnd = new Date(nowTZ.getFullYear(), nowTZ.getMonth(), nowTZ.getDate()+1);
+    // 優先：今日最後一筆打卡
+    let best = null;
+    try {
+      const q = fns.query(fns.collection(db, 'checkins'), fns.where('uid','==', uid));
+      const snap = await withRetry(() => fns.getDocs(q));
+      snap.forEach((doc) => {
+        const d = doc.data() || {};
+        const v = d.createdAt;
+        let dt = null;
+        if (v && typeof v.toDate === 'function') dt = v.toDate(); else if (typeof v === 'string') dt = new Date(v);
+        if (!(dt instanceof Date) || isNaN(dt)) return;
+        if (dt >= dayStart && dt < dayEnd) { if (!best || dt > best.dt) best = { data: d, dt }; }
+      });
+    } catch {}
+    if (best) {
+      const d = best.data; const dt = best.dt;
+      const dateStr = `${dt.getFullYear()}-${two(dt.getMonth()+1)}-${two(dt.getDate())} ${two(dt.getHours())}:${two(dt.getMinutes())}:${two(dt.getSeconds())}`;
+      const summary = `${dateStr} ${d.locationName || ''} ${d.status || ''} ${d.inRadius === true ? '正常' : '異常'}`.trim();
+      const label = d.status || '';
+      setHomeStatus((() => { switch(label){ case '上班': return 'work'; case '下班': return 'off'; case '外出': return 'out'; case '抵達': return 'arrive'; case '返回': return 'return'; case '離開': return 'leave'; case '請假': return 'leave-request'; default: return 'work'; } })(), label);
+      if (homeStatusEl) renderHomeStatusText(summary);
+      try { await renderHomeRosterLabelAsync(); } catch {}
+      return;
+    }
+    // 無打卡：以班表當日狀況（不等待月快取）
+    const plans = appState.rosterPlans || {};
+    const ymd = `${nowTZ.getFullYear()}-${two(nowTZ.getMonth()+1)}-${two(nowTZ.getDate())}`;
+    const acc = (appState.accounts||[]).find((a) => a.id === curId || a.uid === uid) || null;
+    const candidates = [uid, curId, acc?.id, acc?.uid, acc?.name, acc?.email].filter(Boolean).map(String);
+    let plan = null; for (const k of candidates) { const p = plans?.[k]?.[ymd] || null; if (p) { plan = p; break; } }
+    const norm = (s) => { const v = String(s||''); if (v.includes('值班')) return '值班日'; if (v.includes('休假')) return '休假日'; if (v.includes('公休')||v.includes('特休')) return '特休日'; if (v.includes('請假')) return '請假日'; return '上班日'; };
+    let base = plan && plan.status ? norm(plan.status) : defaultRosterStatusForDate(nowTZ);
+    // 今日請假即時查核（不等待月快取）
+    try {
+      const ref = fns.collection(db, 'leaveRequests');
+      const q = fns.query(ref, fns.where('uid','==', uid));
+      const snap = await withRetry(() => fns.getDocs(q));
+      let hasLeave = false;
+      snap.forEach((doc) => {
+        const d = doc.data() || {}; const st = String(d.status||''); if (st && st !== '核准') return;
+        const s = d.startAt; const e = d.endAt;
+        const sdt = typeof s === 'string' ? new Date(s) : (s && typeof s.toDate === 'function' ? s.toDate() : null);
+        const edt = typeof e === 'string' ? new Date(e) : (e && typeof e.toDate === 'function' ? e.toDate() : null);
+        if (!(sdt instanceof Date) || isNaN(sdt) || !(edt instanceof Date) || isNaN(edt)) return;
+        if (!(edt <= dayStart || sdt >= dayEnd)) hasLeave = true;
+      });
+      if (hasLeave) base = '請假日';
+    } catch {}
+    const msg = base === '上班日' ? '今日上班日尚未打卡' : base === '值班日' ? '今日值班日尚未打卡' : base === '休假日' ? '今日休假日' : base === '特休日' ? '今日特休日' : base === '請假日' ? '今日請假日' : '今日尚未打卡';
+    if (homeStatusEl) homeStatusEl.textContent = msg;
+    try {
+      const fRow = document.querySelector('.row-f'); const labelEl = document.getElementById('homeRosterLabel');
+      if (fRow && labelEl) {
+        const cls = (base === '值班日') ? 'arrive' : ((base === '休假日' || base === '特休日') ? 'off' : (base === '請假日' ? 'leave-request' : 'work'));
+        labelEl.innerHTML = `<div class="status-text" style="text-align:center;"><span class="status-label ${cls}">${base}</span></div>`;
+        fRow.classList.remove('hidden');
+      }
+    } catch {}
   } catch {}
 }
 
@@ -479,14 +582,23 @@ async function hasApprovedLeaveToday(uid) {
 async function getTodayRosterStatusForUserAsync(uid) {
   try {
     const now = nowInTZ('Asia/Taipei');
-    const plans = appState.rosterPlans || {};
+    const curId = appState.currentUserId || null;
+    const acc0 = (appState.accounts||[]).find((a) => a.id === curId || a.uid === uid) || null;
+    const created0 = acc0?.createdAt || null;
+    const act = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
+    if (act && now < new Date(act.getFullYear(), act.getMonth(), act.getDate(), 23, 59, 59, 999)) return '';
     const ymd = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-    const plan = (plans[uid] || {})[ymd] || null;
+    const plans = appState.rosterPlans || {};
+    const acc = (appState.accounts||[]).find((a) => a.id === curId || a.uid === uid) || null;
+    const candidates = [uid, curId, acc?.id, acc?.uid, acc?.name, acc?.email].filter((x)=> !!x).map((x)=> String(x));
+    let plan = null;
+    for (const k of candidates) { const p = plans?.[k]?.[ymd] || null; if (p) { plan = p; break; } }
     const norm = (s) => {
       const v = String(s||'');
       if (v.includes('值班')) return '值班日';
       if (v.includes('休假')) return '休假日';
       if (v.includes('公休')) return '特休日';
+      if (v.includes('特休')) return '特休日';
       if (v.includes('請假')) return '請假日';
       return '上班日';
     };
@@ -3011,9 +3123,14 @@ function renderSettingsAccounts() {
     const companyName = appState.companies.find((c) => c.id === a.companyId)?.name || "";
     const service = Array.isArray(a.serviceCommunities) ? a.serviceCommunities.map((id) => appState.communities.find((x) => x.id === id)?.name || id).join("、") : "";
     const lic = Array.isArray(a.licenses) ? a.licenses.map((x) => appState.licenses.find((l) => l.id === x)?.name || x).join("、") : "";
+    const activationDate = (a.createdAt && typeof a.createdAt.toDate === 'function')
+      ? formatDateYYYYMMDD(a.createdAt.toDate())
+      : (a.createdAt instanceof Date ? formatDateYYYYMMDD(a.createdAt)
+        : (typeof a.createdAt === 'string' ? (() => { const d = new Date(a.createdAt); return (d instanceof Date && !isNaN(d)) ? formatDateYYYYMMDD(d) : ''; })() : ''));
     return `<tr data-id="${a.id}">
       <td>${a.photoUrl ? `<img src="${a.photoUrl}" alt="頭像" class="user-photo"/>` : ""}</td>
       <td>${a.name || ""}</td>
+      <td>${activationDate || ""}</td>
       <td>${a.title || ""}</td>
       <td>${a.email || ""}</td>
       <td>${a.phone || ""}</td>
@@ -3053,7 +3170,7 @@ function renderSettingsAccounts() {
         <table class="table">
           <thead>
             <tr>
-              <th>大頭照</th><th>中文姓名</th><th>職稱</th><th>電子郵件</th><th>手機號碼</th><th>預設密碼</th><th>確認密碼</th><th>緊急聯絡人</th><th>緊急聯絡人關係</th><th>緊急聯絡人手機號碼</th><th>血型</th><th>出生年月日</th><th>相關證照</th><th>角色</th><th>公司</th><th>服務社區</th><th>狀況</th><th>操作</th>
+              <th>大頭照</th><th>中文姓名</th><th>系統啟用日期</th><th>職稱</th><th>電子郵件</th><th>手機號碼</th><th>預設密碼</th><th>確認密碼</th><th>緊急聯絡人</th><th>緊急聯絡人關係</th><th>緊急聯絡人手機號碼</th><th>血型</th><th>出生年月日</th><th>相關證照</th><th>角色</th><th>公司</th><th>服務社區</th><th>狀況</th><th>操作</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -3211,7 +3328,7 @@ function renderSettingsAccounts() {
             const docRef = await withRetry(() => fns.addDoc(fns.collection(db, "users"), payload));
             newId = docRef.id;
           }
-          appState.accounts.push({ id: newId, ...d, uid: createdUid || null });
+          appState.accounts.push({ id: newId, ...d, uid: createdUid || null, createdAt: new Date() });
           if (emailExists) {
             alert("儲存成功（此 Email 已存在於登入系統，已寄送重設密碼信，使用者重設後即可登入）");
           } else {
@@ -3236,6 +3353,7 @@ function renderSettingsAccounts() {
         openModal({
           title: "編輯帳號",
           fields: [
+            { key: "activationDate", label: "系統啟用日期", type: "date" },
             { key: "photoUrl", label: "大頭照", type: "file" },
             { key: "name", label: "中文姓名", type: "text" },
             { key: "title", label: "職稱", type: "text" },
@@ -3253,7 +3371,7 @@ function renderSettingsAccounts() {
             { key: "status", label: "狀況", type: "select", options: ["在職","離職"].map((x)=>({value:x,label:x})) },
           ],
           initial: a,
-          afterRender: ({ footer }) => {
+          afterRender: ({ footer, body }) => {
             const btnReset = document.createElement("button");
             btnReset.className = "btn btn-grey";
             btnReset.textContent = "重設密碼";
@@ -3275,6 +3393,14 @@ function renderSettingsAccounts() {
               }
             });
             footer.insertBefore(btnReset, footer.firstChild);
+            const actInput = body.querySelector('[data-key="activationDate"]');
+            if (actInput) {
+              const v0 = a.createdAt && typeof a.createdAt.toDate === 'function' ? a.createdAt.toDate() : (a.createdAt instanceof Date ? a.createdAt : (typeof a.createdAt === 'string' ? new Date(a.createdAt) : null));
+              const v = (v0 instanceof Date && !isNaN(v0)) ? formatDateYYYYMMDD(v0) : '';
+              actInput.value = v;
+              actInput.disabled = false;
+              actInput.title = '修改此日期會影響此帳號的資料可見範圍';
+            }
           },
           onSubmit: async (d) => {
             try {
@@ -3305,12 +3431,22 @@ function renderSettingsAccounts() {
                 status: d.status ?? a.status ?? "在職",
                 updatedAt: fns.serverTimestamp(),
               };
+              const actStr = String(d.activationDate||'').trim();
+              if (actStr) {
+                try {
+                  const parts = actStr.split('-').map((x)=>Number(x));
+                  const dd = new Date(parts[0], (parts[1]||1)-1, parts[2]||1);
+                  if (dd instanceof Date && !isNaN(dd)) payload.createdAt = dd;
+                } catch {}
+              }
               await withRetry(() => fns.setDoc(fns.doc(db, "users", aid), payload, { merge: true }));
               Object.assign(a, { ...d, uid: a.uid || payload.uid || aid });
+              if (payload.createdAt) a.createdAt = payload.createdAt;
               if (appState.currentUserId && appState.currentUserId === aid) {
                 appState.currentUserRole = payload.role || appState.currentUserRole || "一般";
                 applyPagePermissionsForUser({ uid: aid });
               }
+              try { renderSettingsContent("帳號"); } catch {}
               alert("儲存成功");
             } catch (err) {
               alert(`更新帳號失敗：${err?.message || err}`);
@@ -3514,7 +3650,7 @@ function renderSettingsAccounts() {
               const docRef = await withRetry(() => fns.addDoc(fns.collection(db, "users"), payload));
               finalUserId = docRef.id;
             }
-            appState.accounts.push({ id: finalUserId, ...payload, uid: authUid || null });
+            appState.accounts.push({ id: finalUserId, ...payload, uid: authUid || null, createdAt: new Date() });
             appState.pendingAccounts = appState.pendingAccounts.filter((x) => x.id !== pid);
             renderSettingsContent("帳號");
             // 提示狀態：已核准基本資料；若未建立 Auth，提醒管理者後續處理
@@ -4396,20 +4532,7 @@ function hasFullAccessToTab(tab) {
     homeMapOverlay?.classList.toggle("hidden", false);
     // 首頁：A/B/C/D/E 堆疊顯示切換
     homeHeaderStack?.classList.toggle("hidden", tab !== "home");
-    if (tab === "home") {
-      startHomeClock();
-      renderHomeRosterLabel();
-      setHomeNoCheckinMessage();
-      try {
-        const uid = appState.currentUserId || auth?.currentUser?.uid || null;
-        if (uid) {
-          const now = nowInTZ('Asia/Taipei');
-          ensureMonthlyLeavesFor(uid, now.getFullYear(), now.getMonth()).then(() => {
-            try { renderHomeRosterLabel(); setHomeNoCheckinMessage(); } catch {}
-          }).catch(() => {});
-        }
-      } catch {}
-    } else { stopHomeClock(); }
+    if (tab === "home") { startHomeClock(); renderHomeImmediate(); } else { stopHomeClock(); }
     // 所有分頁皆更新定位地圖，僅在頁面可見時執行
     startGeoRefresh();
     if (!same) renderSubTabs(tab);
@@ -4719,7 +4842,7 @@ function hasFullAccessToTab(tab) {
           const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate()+1);
           const key = `${date.getFullYear()}-${date.getMonth()+1}`;
           const monthList = appState.rosterMonthLeaves?.[uid]?.[key] || [];
-          let hasLeave = Array.isArray(monthList) && monthList.length ? monthList.some((r) => !(r.edt < dayStart || r.sdt >= dayEnd)) : false;
+          let hasLeave = Array.isArray(monthList) && monthList.length ? monthList.some((r) => !(r.edt <= dayStart || r.sdt >= dayEnd)) : false;
           if (!hasLeave) {
             const list = Array.isArray(appState.leaveRequests) ? appState.leaveRequests : JSON.parse(localStorage.getItem('leaveRequests')||'[]');
             hasLeave = list.some((r) => {
@@ -4728,7 +4851,7 @@ function hasFullAccessToTab(tab) {
               const s = r.startAt instanceof Date ? r.startAt : (typeof r.startAt === 'string' ? new Date(r.startAt) : null);
               const e = r.endAt instanceof Date ? r.endAt : (typeof r.endAt === 'string' ? new Date(r.endAt) : null);
               if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return false;
-              return !(e < dayStart || s >= dayEnd);
+              return !(e <= dayStart || s >= dayEnd);
             });
           }
           const baseNorm = (v) => String(v||'').includes('值班') ? '值班日' : (String(v||'').includes('休假') ? '休假日' : (String(v||'').includes('公休') ? '特休日' : (String(v||'').includes('請假') ? '請假日' : '上班日')));
@@ -5014,7 +5137,7 @@ function hasFullAccessToTab(tab) {
                 let edt = typeof e === 'string' ? new Date(e) : (e && typeof e.toDate === 'function' ? e.toDate() : null);
                 if (!(sdt instanceof Date) || isNaN(sdt) || !(edt instanceof Date) || isNaN(edt)) return;
                 if (st !== '核准') return;
-                list.push({ sdt, edt });
+                list.push({ sdt, edt, typ: String(data.type||'') });
               });
               appState.rosterMonthLeaves[uid] = appState.rosterMonthLeaves[uid] || {};
               appState.rosterMonthLeaves[uid][key] = list;
@@ -5041,6 +5164,12 @@ function hasFullAccessToTab(tab) {
           const dateObj = new Date(y, m, Number(dayStr));
           const wd5 = dateObj.getDay() === 5;
           if (wd5 && !isTWNationalHoliday(dateObj) && !String(plan?.status||'').includes('值班') && base !== '請假日') base = '特休日';
+            const acc = (appState.accounts||[]).find((a) => a.id === officerId || a.uid === officerId) || null;
+            const created0 = acc?.createdAt || null;
+            const act = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
+            if (act && dateObj < new Date(act.getFullYear(), act.getMonth(), act.getDate())) {
+              return { btnCls: 'roster-cal-day' };
+            }
             function hasLeaveOnDate(officerId, date) {
               try {
                 const ids = resolveOfficerIds(officerId);
@@ -5050,7 +5179,7 @@ function hasFullAccessToTab(tab) {
                 const key = `${date.getFullYear()}-${date.getMonth()+1}`;
                 const monthList = appState.rosterMonthLeaves?.[uid]?.[key] || [];
                 if (Array.isArray(monthList) && monthList.length) {
-                  return monthList.some((r) => !(r.edt < dayStart || r.sdt >= dayEnd));
+                  return monthList.some((r) => !(r.edt <= dayStart || r.sdt >= dayEnd));
                 }
                 const list = Array.isArray(appState.leaveRequests) ? appState.leaveRequests : JSON.parse(localStorage.getItem('leaveRequests')||'[]');
                 return list.some((r) => {
@@ -5059,7 +5188,7 @@ function hasFullAccessToTab(tab) {
                   const s = r.startAt instanceof Date ? r.startAt : (typeof r.startAt === 'string' ? new Date(r.startAt) : null);
                   const e = r.endAt instanceof Date ? r.endAt : (typeof r.endAt === 'string' ? new Date(r.endAt) : null);
                   if (!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return false;
-                  return !(e < dayStart || s >= dayEnd);
+                  return !(e <= dayStart || s >= dayEnd);
                 });
               } catch { return false; }
             }
@@ -7924,9 +8053,9 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                   <th>早退</th>
                   <th>病假</th>
                   <th>事假</th>
-                  <th>其他假別</th>
-                  <th>休假日上班</th>
-                  <th>特休日</th>
+                  <th>其他</th>
+                  <th>加班</th>
+                  <th>特休</th>
                   <th>曠職</th>
                   <th>計點</th>
                 </tr></thead>
@@ -7960,6 +8089,97 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
           const sumBody = container.querySelector('#reportSummaryBody');
           const btnPrint = container.querySelector('#btnPrintReport');
           if (!monthInput || !tbody) return;
+          const signTableEl = container.querySelector('#reportSignTable');
+          const signCells = Array.from(signTableEl?.querySelectorAll('tbody td') || []);
+          const signRoles = ['總經理','人事','主管','本人'];
+          const loadReportSigs = async (ym) => {
+            try {
+              await ensureFirebase();
+              const u = auth?.currentUser || null;
+              if (!u) return;
+              let map = {};
+              try {
+                const ds = await withRetry(() => fns.getDoc(fns.doc(db, 'reportSignatures', `${u.uid}_${ym}`)));
+                if (ds.exists()) { const d = ds.data() || {}; map = d.map || {}; }
+              } catch {}
+              appState.reportSignatures = appState.reportSignatures || {};
+              appState.reportSignatures[ym] = map;
+              signCells.forEach((cell, idx) => { const url = map[idx]; cell.innerHTML = url ? `<img src="${url}" alt="簽名" style="height:64px;object-fit:contain;"/>` : ''; });
+            } catch {}
+          };
+          const saveReportSigs = async (ym) => {
+            try {
+              await ensureFirebase();
+              const u = auth?.currentUser || null;
+              if (!u) return;
+              const map = (appState.reportSignatures||{})[ym] || {};
+              const payload = { uid: u.uid, ym, map, updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date(networkNowMs()).toISOString() };
+              await withRetry(() => fns.setDoc(fns.doc(db, 'reportSignatures', `${u.uid}_${ym}`), payload, { merge: true }));
+            } catch {}
+          };
+          function openSignaturePad(idx, cell) {
+            openModal({
+              title: `簽名 - ${signRoles[idx]}`,
+              fields: [ { key: 'sig', label: '簽名', type: 'text' } ],
+              submitText: '確認',
+              refreshOnSubmit: false,
+              afterRender: ({ body, footer, inputs }) => {
+                const wrap = document.createElement('div');
+                wrap.style.display = 'grid';
+                wrap.style.gridTemplateColumns = '1fr';
+                wrap.style.gap = '8px';
+                const canvas = document.createElement('canvas');
+                canvas.width = 480; canvas.height = 160;
+                canvas.style.border = '1px solid #374151';
+                canvas.style.background = '#fff';
+                const ctx = canvas.getContext('2d');
+                ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = '#111827';
+                let drawing = false; let last = null;
+                const getPos = (e) => {
+                  const rect = canvas.getBoundingClientRect();
+                  const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+                  const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+                  return { x, y };
+                };
+                const start = (e) => { drawing = true; last = getPos(e); e.preventDefault(); };
+                const move = (e) => { if (!drawing) return; const p = getPos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; e.preventDefault(); };
+                const end = () => { drawing = false; last = null; };
+                canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move); canvas.addEventListener('mouseup', end); canvas.addEventListener('mouseleave', end);
+                canvas.addEventListener('touchstart', start, { passive: false }); canvas.addEventListener('touchmove', move, { passive: false }); canvas.addEventListener('touchend', end);
+                const tools = document.createElement('div');
+                tools.style.display = 'flex'; tools.style.gap = '8px';
+                const btnClear = document.createElement('button'); btnClear.className = 'btn btn-grey'; btnClear.textContent = '清除'; attachPressInteractions(btnClear);
+                btnClear.addEventListener('click', () => { ctx.clearRect(0,0,canvas.width,canvas.height); });
+                tools.appendChild(btnClear);
+                wrap.appendChild(canvas); wrap.appendChild(tools); body.appendChild(wrap);
+                const hidden = inputs[0]; hidden.type = 'hidden';
+                const btnSubmit = footer?.querySelector('.btn-darkgrey');
+                btnSubmit?.addEventListener('click', () => { hidden.value = canvas.toDataURL('image/png'); });
+              },
+              onSubmit: async (data) => {
+                const ym = monthInput.value || '';
+                appState.reportSignatures = appState.reportSignatures || {};
+                appState.reportSignatures[ym] = appState.reportSignatures[ym] || {};
+                const url = String(data.sig||'');
+                if (url) {
+                  appState.reportSignatures[ym][idx] = url;
+                  cell.innerHTML = `<img src="${url}" alt="簽名" style="height:64px;object-fit:contain;"/>`;
+                  await saveReportSigs(ym);
+                }
+              }
+            });
+          }
+          signCells.forEach((cell, idx) => {
+            cell.style.cursor = 'pointer';
+            cell.title = `點擊簽名：${signRoles[idx]}`;
+            cell.addEventListener('click', () => openSignaturePad(idx, cell));
+          });
+          (function restoreSigs(){
+            const ym = monthInput.value || todayYm;
+            const map = (appState.reportSignatures||{})[ym] || {};
+            signCells.forEach((cell, idx) => { const url = map[idx]; if (url) cell.innerHTML = `<img src="${url}" alt="簽名" style="height:64px;object-fit:contain;"/>`; });
+            try { loadReportSigs(ym); } catch {}
+          })();
           monthInput.value = todayYm;
           const weekday = (d) => ['日','一','二','三','四','五','六'][d.getDay()];
           const rosterStatusFromPlan = (v) => {
@@ -7979,7 +8199,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const s = lv.sdt instanceof Date && !isNaN(lv.sdt) ? lv.sdt : null;
               const e = lv.edt instanceof Date && !isNaN(lv.edt) ? lv.edt : null;
               if (!s || !e) return false;
-              return !(e < dayStart || s >= dayEnd);
+              return !(e <= dayStart || s >= dayEnd);
             });
             if (leaveHit) return '請假日';
             // 讀班表
@@ -8048,6 +8268,11 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             for (let d = new Date(start); d < end; d.setDate(d.getDate()+1)) {
               const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
               const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate()+1);
+              const id0 = appState.currentUserId || null;
+              const acc0 = (appState.accounts||[]).find((a) => a.id === id0 || a.uid === user.uid) || null;
+              const created0 = acc0?.createdAt || null;
+              const act0 = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
+              const preAct = act0 ? (dayStart < new Date(act0.getFullYear(), act0.getMonth(), act0.getDate())) : false;
               const dayList = checkins.filter((r) => r.dt >= dayStart && r.dt < dayEnd);
               const pickBase = (st) => String(st||'').split('-')[0];
               const startCandidates = dayList.filter((r) => pickBase(r.status)==='上班');
@@ -8069,7 +8294,15 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               })();
               const issues = [];
               const isLeader = /主管|管理/.test(String(appState.currentUserRole||''));
-              if (!startAt && !endAt && base!=='請假日' && base!=='休假日' && base!=='特休日') issues.push('曠職');
+              if (!startAt && !endAt && base!=='請假日' && base!=='休假日' && base!=='特休日') {
+                const nowTZ = nowInTZ('Asia/Taipei');
+                let planEndCut = null;
+                if (planEnd) {
+                  const [eh, em] = String(planEnd).split(':').map((x)=>Number(x));
+                  planEndCut = new Date(dayStart); planEndCut.setHours(eh||17, em||30, 0, 0);
+                }
+                if (planEndCut && nowTZ < planEndCut) issues.push('未完成打卡流程'); else issues.push('曠職');
+              }
               if (!!startAt !== !!endAt && base!=='請假日' && base!=='休假日' && base!=='特休日') issues.push('未完成打卡流程');
               if (isLeader && startAt && endAt && totalHours < 8.5 && base!=='休假日' && base!=='請假日' && base!=='特休日') issues.push('總時數不足');
               // 遲到/早退（以預設門檻）
@@ -8077,9 +8310,23 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const offCut = new Date(dayStart); offCut.setHours(17,30,0,0);
               if (startAt && startAt > lateCut && base!=='休假日' && base!=='請假日') issues.push('遲到');
               if (endAt && endAt < offCut && base!=='休假日' && base!=='請假日') issues.push('早退');
-              const statusText = issues.length ? `異常：${issues.join('、')}` : `正常：${base}`;
+              let leaveType = '';
+              if (base === '請假日') {
+                try {
+                  const hit = leaves.find((lv) => {
+                    const sdt = lv.sdt instanceof Date && !isNaN(lv.sdt) ? lv.sdt : null;
+                    const edt = lv.edt instanceof Date && !isNaN(lv.edt) ? lv.edt : null;
+                    if (!sdt || !edt) return false;
+                    return !(edt <= dayStart || sdt >= dayEnd);
+                  });
+                  const t = String(hit?.type || hit?.typ || '');
+                  if (/病/.test(t)) leaveType = '病假'; else if (/事/.test(t)) leaveType = '事假'; else leaveType = '其他';
+                } catch {}
+              }
+              const displayBase = leaveType ? `請假日(${leaveType})` : base;
+              const statusText = preAct ? '' : (issues.length ? `異常：${issues.join('、')}` : `正常：${displayBase}`);
               const isNormal = issues.length === 0;
-              rows.push({ date: new Date(dayStart), week: weekday(dayStart), startAt, endAt, totalHours, statusText, isNormal, planStart, planEnd, planHours });
+              rows.push({ date: new Date(dayStart), week: weekday(dayStart), startAt: preAct ? null : startAt, endAt: preAct ? null : endAt, totalHours: preAct ? 0 : totalHours, statusText, isNormal, planStart: preAct ? '' : planStart, planEnd: preAct ? '' : planEnd, planHours: preAct ? 0 : planHours, preAct });
             }
             const frag = document.createDocumentFragment();
             rows.forEach((r) => {
@@ -8087,21 +8334,30 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const ymd = `${r.date.getFullYear()}-${two(r.date.getMonth()+1)}-${two(r.date.getDate())}`;
               const td1 = document.createElement('td'); td1.textContent = two(r.date.getDate());
               const td2 = document.createElement('td'); td2.textContent = r.week;
-              const td3 = document.createElement('td'); td3.innerHTML = `<div>班 : ${r.planStart || ''}</div><div>實 : ${timeStr(r.startAt) || ''}</div>`;
-              const td4 = document.createElement('td'); td4.innerHTML = `<div>班 : ${r.planEnd || ''}</div><div>實 : ${timeStr(r.endAt) || ''}</div>`;
-              const td5 = document.createElement('td'); td5.innerHTML = `<div>班 : ${r.planHours ? r.planHours.toFixed(2)+' 小時' : ''}</div><div>實 : ${r.totalHours ? r.totalHours.toFixed(2)+' 小時' : ''}</div>`;
+              const td3 = document.createElement('td');
+              const td4 = document.createElement('td');
+              const td5 = document.createElement('td');
+              const startPlanCut = (() => { if (!r.planStart) return null; const [sh, sm] = String(r.planStart).split(':').map(Number); const d = new Date(r.date); d.setHours(sh||9, sm||0, 0, 0); return d; })();
+              const endPlanCut = (() => { if (!r.planEnd) return null; const [eh, em] = String(r.planEnd).split(':').map(Number); const d = new Date(r.date); d.setHours(eh||17, em||30, 0, 0); return d; })();
+              const startCls = (startPlanCut && r.startAt) ? (r.startAt <= startPlanCut ? 'text-good' : 'text-bad') : '';
+              const endCls = (endPlanCut && r.endAt) ? (r.endAt >= endPlanCut ? 'text-good' : 'text-bad') : '';
+              const hoursCls = (r.planHours && r.totalHours) ? (r.totalHours >= r.planHours ? 'text-good' : 'text-bad') : '';
+              td3.innerHTML = `<div>班 : ${r.planStart || ''}</div><div>實 : <span class="${startCls}">${timeStr(r.startAt) || ''}</span></div>`;
+              td4.innerHTML = `<div>班 : ${r.planEnd || ''}</div><div>實 : <span class="${endCls}">${timeStr(r.endAt) || ''}</span></div>`;
+              td5.innerHTML = `<div>班 : ${r.planHours ? r.planHours.toFixed(2) : ''}</div><div>實 : <span class="${hoursCls}">${r.totalHours ? r.totalHours.toFixed(2) : ''}</span></div>`;
               const td6 = document.createElement('td');
               const computed = (() => {
                 const ph = Number(r.planHours||0);
                 const ah = Number(r.totalHours||0);
-                const abnormalZero = /曠職|總時數不足/.test(String(r.statusText||''));
-                if (abnormalZero) return 0;
+                const abnormalHide = /曠職|未完成打卡流程/.test(String(r.statusText||''));
+                if (abnormalHide) return null;
                 if (ph && ah) return (ph > ah ? ah : ph);
                 if (ph) return ph;
                 if (ah) return ah;
                 return null;
               })();
-              td6.textContent = computed ? `${computed.toFixed(2)} 小時` : '';
+              td6.textContent = computed !== null ? `${computed.toFixed(2)}` : '';
+              if (hoursCls) { try { td6.classList.add(hoursCls); } catch {} }
               const td7 = document.createElement('td');
               const dayPoints = /曠職/.test(String(r.statusText||'')) ? -1 : 0;
               td7.textContent = dayPoints ? String(dayPoints) : '';
@@ -8118,12 +8374,12 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const isFuture = (r.date.getFullYear() > t.getFullYear()) ||
                                (r.date.getFullYear() === t.getFullYear() && r.date.getMonth() > t.getMonth()) ||
                                (r.date.getFullYear() === t.getFullYear() && r.date.getMonth() === t.getMonth() && r.date.getDate() > t.getDate());
-              if (isFuture) { td3.innerHTML = ''; td4.innerHTML = ''; td5.innerHTML = ''; td6.textContent = ''; td7.textContent = ''; td8.innerHTML = ''; }
+              if (r.preAct || isFuture) { td3.innerHTML = ''; td4.innerHTML = ''; td5.innerHTML = ''; td6.textContent = ''; td7.textContent = ''; td8.innerHTML = ''; }
               tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5); tr.appendChild(td6); tr.appendChild(td7); tr.appendChild(td8);
               frag.appendChild(tr);
             });
             tbody.innerHTML = ''; tbody.appendChild(frag);
-            const sum = { attendDays: 0, attendHours: 0, lateDays: 0, lateHours: 0, earlyDays: 0, earlyHours: 0, sickDays: 0, sickHours: 0, personalDays: 0, personalHours: 0, otherLeaveDays: 0, otherLeaveHours: 0, offWorkDays: 0, offWorkHours: 0, specialOffDays: 0, specialOffHours: 0, absentDays: 0, pointsTotal: 0 };
+            const sum = { attendDays: 0, attendHours: 0, lateDays: 0, lateHours: 0, earlyDays: 0, earlyHours: 0, sickDays: 0, sickHours: 0, personalDays: 0, personalHours: 0, otherLeaveDays: 0, otherLeaveHours: 0, offWorkDays: 0, offWorkHours: 0, specialOffDays: 0, specialOffHours: 0, absentDays: 0, absentHours: 0, pointsTotal: 0 };
             rows.forEach((r) => {
               const parts = String(r.statusText||'').split('：');
               const reason = parts.length > 1 ? parts.slice(1).join('：') : '';
@@ -8135,14 +8391,30 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               if (completed) { sum.attendDays += 1; sum.attendHours += Number(r.totalHours||0); }
               if (/遲到/.test(String(r.statusText||''))) { sum.lateDays += 1; sum.lateHours += Number(r.totalHours||0); }
               if (/早退/.test(String(r.statusText||''))) { sum.earlyDays += 1; sum.earlyHours += Number(r.totalHours||0); }
-              if (onLeave) { sum.otherLeaveDays += 1; }
+              if (onLeave) {
+                const hit = leaves.find((lv) => {
+                  const sdt = lv.sdt instanceof Date && !isNaN(lv.sdt) ? lv.sdt : null;
+                  const edt = lv.edt instanceof Date && !isNaN(lv.edt) ? lv.edt : null;
+                  if (!sdt || !edt) return false;
+                  const ds = new Date(r.date.getFullYear(), r.date.getMonth(), r.date.getDate());
+                  const de = new Date(r.date.getFullYear(), r.date.getMonth(), r.date.getDate()+1);
+                  return !(edt <= ds || sdt >= de);
+                });
+                const t = String(hit?.type || hit?.typ || '');
+                if (/病/.test(t)) sum.sickDays += 1; else if (/事/.test(t)) sum.personalDays += 1; else sum.otherLeaveDays += 1;
+              }
               if (onOff && (hasStart || hasEnd)) { sum.offWorkDays += 1; sum.offWorkHours += Number(r.totalHours||0); }
               if (onSpecialOff) { sum.specialOffDays += 1; if (hasStart || hasEnd) sum.specialOffHours += Number(r.totalHours||0); }
-              if (/曠職/.test(String(r.statusText||''))) { sum.absentDays += 1; sum.pointsTotal += -1; } else { sum.pointsTotal += 0; }
+              if (/曠職/.test(String(r.statusText||''))) { sum.absentDays += 1; sum.absentHours += Number(r.planHours||0); sum.pointsTotal += -1; } else { sum.pointsTotal += 0; }
             });
             const days = [sum.attendDays, sum.lateDays, sum.earlyDays, sum.sickDays, sum.personalDays, sum.otherLeaveDays, sum.offWorkDays, sum.specialOffDays, sum.absentDays, String(sum.pointsTotal)];
             const hoursBase = [sum.attendHours, sum.lateHours, sum.earlyHours, sum.sickHours, sum.personalHours, sum.otherLeaveHours, sum.offWorkHours, sum.specialOffHours];
-            const hours = hoursBase.map((n)=> (n ? n.toFixed(2)+' 小時' : '')).concat(['', '']);
+            const hoursFmt = hoursBase.map((n, i)=> {
+              if (i === 1 || i === 2) return ''; // 遲到、早退不計算小時
+              if (i === 6) return (n ? n.toFixed(2) : '0'); // 加班小時
+              return n ? n.toFixed(2) : '';
+            });
+            const hours = hoursFmt.concat([sum.absentHours ? sum.absentHours.toFixed(2) : '0', '']);
             if (sumBody) {
               const r1 = document.createElement('tr'); r1.innerHTML = days.map((n)=>`<td>${n}</td>`).join('');
               const r2 = document.createElement('tr'); r2.innerHTML = hours.map((t)=>`<td>${t}</td>`).join('');
@@ -8150,7 +8422,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             }
           };
           renderMonth(todayYm);
-          monthInput.addEventListener('change', () => renderMonth(monthInput.value));
+          monthInput.addEventListener('change', async () => { const ym2 = monthInput.value; await loadReportSigs(ym2); renderMonth(ym2); });
           btnPrint?.addEventListener('click', () => {
             try {
               const ym = monthInput.value || todayYm;
@@ -8170,7 +8442,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const sumBodyHtml = sumRows.map((row)=>`<tr>${row.map((t)=>`<td>${t}</td>`).join('')}</tr>`).join('');
               const signTable = container.querySelector('#reportSignTable');
               const signHeadCells = Array.from(signTable?.querySelectorAll('thead th')||[]).map((th)=> th.textContent || '');
-              const signRows = Array.from(signTable?.querySelectorAll('tbody tr')||[]).map((tr)=> Array.from(tr.querySelectorAll('td')).map((td)=> td.textContent || ''));
+              const signRows = Array.from(signTable?.querySelectorAll('tbody tr')||[]).map((tr)=> Array.from(tr.querySelectorAll('td')).map((td)=> td.innerHTML || ''));
               const signHeadHtml = signHeadCells.length ? `<tr>${signHeadCells.map((t)=>`<th>${t}</th>`).join('')}</tr>` : '';
               const signBodyHtml = signRows.map((row)=>`<tr>${row.map((t)=>`<td style=\"height:64px;\">${t}</td>`).join('')}</tr>`).join('');
               const html = `<!doctype html><html><head><meta charset="utf-8"><title>個人出勤紀錄表</title>

@@ -369,6 +369,9 @@ button[disabled] { cursor: not-allowed; }
 .home-layout .home-mid-stack .row-f .status-label.off { color: #9ca3af !important; }
 /* 首頁：F 列改為上下排列，Wi‑Fi 置於底部置中 */
 .home-layout .home-mid-stack .row-f { display: grid; grid-template-rows: 1fr auto; place-items: center; }
+/* 數值比對色彩：綠優/紅劣 */
+.text-good { color: #10b981; }
+.text-bad { color: #ef4444; }
 
 /* 表格中的狀態標籤字級與字重與儲存格一致 */
 .table .status-label { font-size: inherit; font-weight: inherit; }
