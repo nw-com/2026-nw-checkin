@@ -8444,16 +8444,17 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const signHeadCells = Array.from(signTable?.querySelectorAll('thead th')||[]).map((th)=> th.textContent || '');
               const signRows = Array.from(signTable?.querySelectorAll('tbody tr')||[]).map((tr)=> Array.from(tr.querySelectorAll('td')).map((td)=> td.innerHTML || ''));
               const signHeadHtml = signHeadCells.length ? `<tr>${signHeadCells.map((t)=>`<th>${t}</th>`).join('')}</tr>` : '';
-              const signBodyHtml = signRows.map((row)=>`<tr>${row.map((t)=>`<td style=\"height:64px;\">${t}</td>`).join('')}</tr>`).join('');
+              const signBodyHtml = signRows.map((row)=>`<tr>${row.map((t)=>`<td style=\"height:40px;\">${t}</td>`).join('')}</tr>`).join('');
               const html = `<!doctype html><html><head><meta charset="utf-8"><title>個人出勤紀錄表</title>
               <style>
-              @page { size: A4; margin: 12mm; }
+              @page { size: A4; margin: 8mm; }
               body { font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif; color: #111827; }
-              .h1 { font-size: 18px; font-weight: 700; text-align: center; }
-              .h2, .h3 { font-size: 14px; text-align: center; margin-top: 4px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-              th, td { border: 1px solid #374151; padding: 6px 8px; font-size: 12px; }
+              .h1 { font-size: 16px; font-weight: 700; text-align: center; }
+              .h2, .h3 { font-size: 12px; text-align: center; margin-top: 2px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; }
+              th, td { border: 1px solid #374151; padding: 2px 4px; font-size: 10px; line-height: 1.1; vertical-align: top; word-break: break-word; }
               thead th { background: #f3f4f6; }
+              img { max-height: 40px; object-fit: contain; }
               </style></head><body>
               <div class="h1">西北保全</div>
               <div class="h2">${companyName}  ${jobTitle}  ${name}</div>
