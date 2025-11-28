@@ -8109,18 +8109,24 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
           const signTableEl = container.querySelector('#reportSignTable');
           const signCells = Array.from(signTableEl?.querySelectorAll('tbody td') || []);
           const signRoles = ['總經理','人事','主管','本人'];
+          const getLocalReportSigs = (key) => { try { const s = localStorage.getItem(`reportSignatures:${key}`); return s ? JSON.parse(s) : {}; } catch { return {}; } };
+          const setLocalReportSigs = (key, ym, map) => { try { const obj = getLocalReportSigs(key); obj[ym] = map || {}; localStorage.setItem(`reportSignatures:${key}`, JSON.stringify(obj)); } catch {} };
           const loadReportSigs = async (ym) => {
             try {
               await ensureFirebase();
               const u = auth?.currentUser || null;
-              if (!u) return;
+              const k = appState.currentUserId || u?.uid || 'local';
               let map = {};
               try {
-                const ds = await withRetry(() => fns.getDoc(fns.doc(db, 'reportSignatures', `${u.uid}_${ym}`)));
-                if (ds.exists()) { const d = ds.data() || {}; map = d.map || {}; }
+                if (u) {
+                  const ds = await withRetry(() => fns.getDoc(fns.doc(db, 'reportSignatures', `${u.uid}_${ym}`)));
+                  if (ds.exists()) { const d = ds.data() || {}; map = d.map || {}; }
+                }
               } catch {}
+              if (!Object.keys(map).length) { const local = getLocalReportSigs(k); map = local[ym] || {}; }
               appState.reportSignatures = appState.reportSignatures || {};
               appState.reportSignatures[ym] = map;
+              setLocalReportSigs(k, ym, map);
               signCells.forEach((cell, idx) => { const url = map[idx]; cell.innerHTML = url ? `<img src="${url}" alt="簽名" style="height:64px;object-fit:contain;"/>` : ''; });
             } catch {}
           };
@@ -8128,10 +8134,13 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             try {
               await ensureFirebase();
               const u = auth?.currentUser || null;
-              if (!u) return;
+              const k = appState.currentUserId || u?.uid || 'local';
               const map = (appState.reportSignatures||{})[ym] || {};
-              const payload = { uid: u.uid, ym, map, updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date(networkNowMs()).toISOString() };
-              await withRetry(() => fns.setDoc(fns.doc(db, 'reportSignatures', `${u.uid}_${ym}`), payload, { merge: true }));
+              setLocalReportSigs(k, ym, map);
+              if (u) {
+                const payload = { uid: u.uid, ym, map, updatedAt: fns.serverTimestamp ? fns.serverTimestamp() : new Date(networkNowMs()).toISOString() };
+                await withRetry(() => fns.setDoc(fns.doc(db, 'reportSignatures', `${u.uid}_${ym}`), payload, { merge: true }));
+              }
             } catch {}
           };
           function openSignaturePad(idx, cell) {
@@ -8152,6 +8161,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 const ctx = canvas.getContext('2d');
                 ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.strokeStyle = '#111827';
                 let drawing = false; let last = null;
+                let lastSigUrl = '';
                 const getPos = (e) => {
                   const rect = canvas.getBoundingClientRect();
                   const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
@@ -8160,18 +8170,21 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 };
                 const start = (e) => { drawing = true; last = getPos(e); e.preventDefault(); };
                 const move = (e) => { if (!drawing) return; const p = getPos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; e.preventDefault(); };
-                const end = () => { drawing = false; last = null; };
+                const end = () => { drawing = false; last = null; try { lastSigUrl = canvas.toDataURL('image/png'); } catch {} };
                 canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move); canvas.addEventListener('mouseup', end); canvas.addEventListener('mouseleave', end);
                 canvas.addEventListener('touchstart', start, { passive: false }); canvas.addEventListener('touchmove', move, { passive: false }); canvas.addEventListener('touchend', end);
                 const tools = document.createElement('div');
                 tools.style.display = 'flex'; tools.style.gap = '8px';
                 const btnClear = document.createElement('button'); btnClear.className = 'btn btn-grey'; btnClear.textContent = '清除'; attachPressInteractions(btnClear);
-                btnClear.addEventListener('click', () => { ctx.clearRect(0,0,canvas.width,canvas.height); });
+                btnClear.addEventListener('click', () => { ctx.clearRect(0,0,canvas.width,canvas.height); lastSigUrl = ''; });
                 tools.appendChild(btnClear);
                 wrap.appendChild(canvas); wrap.appendChild(tools); body.appendChild(wrap);
                 const hidden = inputs[0]; hidden.type = 'hidden';
                 const btnSubmit = footer?.querySelector('.btn-darkgrey');
-                btnSubmit?.addEventListener('click', () => { hidden.value = canvas.toDataURL('image/png'); });
+                // 使用 pointerdown/touchstart 確保在 openModal 內建 click 處理之前更新值
+                const updateSig = () => { try { const url = lastSigUrl || canvas.toDataURL('image/png'); hidden.value = url; } catch {} };
+                btnSubmit?.addEventListener('pointerdown', updateSig);
+                btnSubmit?.addEventListener('touchstart', updateSig, { passive: true });
               },
               onSubmit: async (data) => {
                 const ym = monthInput.value || '';
@@ -8181,6 +8194,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 if (url) {
                   appState.reportSignatures[ym][idx] = url;
                   cell.innerHTML = `<img src="${url}" alt="簽名" style="height:64px;object-fit:contain;"/>`;
+                  try { const u = auth?.currentUser || null; const k = appState.currentUserId || u?.uid || 'local'; const map = (appState.reportSignatures||{})[ym] || {}; setLocalReportSigs(k, ym, map); } catch {}
                   await saveReportSigs(ym);
                 }
               }
@@ -8343,6 +8357,10 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const displayBase = leaveType ? `請假日(${leaveType})` : base;
               const statusText = preAct ? '' : (issues.length ? `異常：${issues.join('、')}` : `正常：${displayBase}`);
               const isNormal = issues.length === 0;
+              const tzNow2 = nowInTZ('Asia/Taipei');
+              const isFuture = (dayStart.getFullYear() > tzNow2.getFullYear()) ||
+                               (dayStart.getFullYear() === tzNow2.getFullYear() && dayStart.getMonth() > tzNow2.getMonth()) ||
+                               (dayStart.getFullYear() === tzNow2.getFullYear() && dayStart.getMonth() === tzNow2.getMonth() && dayStart.getDate() > tzNow2.getDate());
               rows.push({
                 date: new Date(dayStart),
                 week: weekday(dayStart),
@@ -8354,7 +8372,8 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
                 planStart: preAct ? '' : planStart,
                 planEnd: preAct ? '' : planEnd,
                 planHours: preAct ? 0 : planHours,
-                preAct
+                preAct,
+                isFuture
               });
             }
             const frag = document.createDocumentFragment();
@@ -8410,6 +8429,7 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
             tbody.innerHTML = ''; tbody.appendChild(frag);
             const sum = { attendDays: 0, attendHours: 0, lateDays: 0, lateHours: 0, earlyDays: 0, earlyHours: 0, sickDays: 0, sickHours: 0, personalDays: 0, personalHours: 0, otherLeaveDays: 0, otherLeaveHours: 0, offWorkDays: 0, offWorkHours: 0, specialOffDays: 0, specialOffHours: 0, absentDays: 0, absentHours: 0, pointsTotal: 0 };
             rows.forEach((r) => {
+              if (r.isFuture) return;
               const parts = String(r.statusText||'').split('：');
               const reason = parts.length > 1 ? parts.slice(1).join('：') : '';
               const onLeave = /請假日/.test(reason);
@@ -8474,25 +8494,31 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const signRows = Array.from(signTable?.querySelectorAll('tbody tr')||[]).map((tr)=> Array.from(tr.querySelectorAll('td')).map((td)=> td.innerHTML || ''));
               const signHeadHtml = signHeadCells.length ? `<tr>${signHeadCells.map((t)=>`<th>${t}</th>`).join('')}</tr>` : '';
               const signBodyHtml = signRows.map((row)=>`<tr>${row.map((t)=>`<td style=\"height:40px;\">${t}</td>`).join('')}</tr>`).join('');
+              const printAt = nowInTZ('Asia/Taipei');
+              const p2 = (n) => String(n).padStart(2, '0');
+              const printTs = `${printAt.getFullYear()}-${p2(printAt.getMonth()+1)}-${p2(printAt.getDate())} ${p2(printAt.getHours())}:${p2(printAt.getMinutes())}`;
               const html = `<!doctype html><html><head><meta charset="utf-8"><title>個人出勤紀錄表</title>
               <style>
               @page { size: A4; margin: 8mm; }
               body { font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', sans-serif; color: #111827; }
               .h1 { font-size: 16px; font-weight: 700; text-align: center; }
               .h2, .h3 { font-size: 12px; text-align: center; margin-top: 2px; }
+              .print-time { position: fixed; top: 8mm; right: 8mm; font-size: 10px; color: #6b7280; }
               table { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; }
               th, td { border: 1px solid #374151; padding: 2px 4px; font-size: 10px; line-height: 1.1; vertical-align: top; word-break: break-word; }
               thead th { background: #f3f4f6; }
               img { max-height: 40px; object-fit: contain; }
+              .summary th, .summary td { text-align: center; }
               </style></head><body>
+              <div class="print-time">${printTs}</div>
               <div class="h1">西北保全</div>
               <div class="h2">${companyName}  ${jobTitle}  ${name}</div>
               <div class="h3">${ym}  個人出勤紀錄表</div>
-              <table><thead><tr>
+              <table class="report"><colgroup><col style="width:5%"><col style="width:5%"><col style="width:15%"><col style="width:15%"><col style="width:15%"><col style="width:10%"><col style="width:5%"><col style="width:30%"></colgroup><thead><tr>
               <th>日期</th><th>週</th><th>上班打卡時間</th><th>下班打卡時間</th><th>總上班時數</th><th>判定工時</th><th>計點</th><th>狀態</th>
               </tr></thead><tbody>${rowsHtml}</tbody></table>
-              <table>${sumHeadHtml}${sumBodyHtml ? `<tbody>${sumBodyHtml}</tbody>` : ''}</table>
-              <table>${signHeadHtml}${signBodyHtml ? `<tbody>${signBodyHtml}</tbody>` : ''}</table>
+              <table class="summary">${sumHeadHtml}${sumBodyHtml ? `<tbody>${sumBodyHtml}</tbody>` : ''}</table>
+              <table class="sign"><colgroup><col span="4" style="width:25%"></colgroup>${signHeadHtml}${signBodyHtml ? `<tbody>${signBodyHtml}</tbody>` : ''}</table>
               </body></html>`;
               const w = window.open('', '_blank');
               if (!w) return;
