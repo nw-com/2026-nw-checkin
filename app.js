@@ -4230,6 +4230,7 @@ let ensureFirebasePromise = null;
           role: d.role || "保全",
           companyId: d.companyId || null,
           companyIds: Array.isArray(d.companyIds) ? d.companyIds : (d.companyId ? [d.companyId] : []),
+          createdAt: d.createdAt || null,
         serviceCommunities: Array.isArray(d.serviceCommunities) ? d.serviceCommunities : [],
         status: d.status || "在職",
       });
@@ -4820,14 +4821,21 @@ function hasFullAccessToTab(tab) {
           return null;
         } catch { return null; }
       }
-      function updateRoster(date) {
-        if (rosterDateEl) rosterDateEl.textContent = `日期：${ymd(date)}`;
-        if (!rosterListBody) return;
-        rosterListBody.innerHTML = "";
-        const officerId = sel?.value || "";
-        const ids = resolveOfficerIds(officerId);
-        const bucket = getRosterBucketByIds(ids);
-        const plan = getRosterPlan(bucket, date.getFullYear(), date.getMonth(), date.getDate());
+        function updateRoster(date) {
+          if (rosterDateEl) rosterDateEl.textContent = `日期：${ymd(date)}`;
+          if (!rosterListBody) return;
+          rosterListBody.innerHTML = "";
+          const officerId = sel?.value || "";
+          try {
+            const acc = (appState.accounts||[]).find((a) => a.id === officerId || a.uid === officerId) || null;
+            const created0 = acc?.createdAt || null;
+            const act = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
+            const actMid = act ? new Date(act.getFullYear(), act.getMonth(), act.getDate()) : null;
+            if (actMid && date < actMid) { return; }
+          } catch {}
+          const ids = resolveOfficerIds(officerId);
+          const bucket = getRosterBucketByIds(ids);
+          const plan = getRosterPlan(bucket, date.getFullYear(), date.getMonth(), date.getDate());
         const wd = date.getDay();
         const holiday = isHoliday(date);
         const defaultStatus = defaultRosterStatusForDate(date);
@@ -5167,9 +5175,8 @@ function hasFullAccessToTab(tab) {
             const acc = (appState.accounts||[]).find((a) => a.id === officerId || a.uid === officerId) || null;
             const created0 = acc?.createdAt || null;
             const act = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
-            if (act && dateObj < new Date(act.getFullYear(), act.getMonth(), act.getDate())) {
-              return { btnCls: 'roster-cal-day' };
-            }
+            const actMid = act ? new Date(act.getFullYear(), act.getMonth(), act.getDate()) : null;
+            const disabled = !!(actMid && dateObj < actMid);
             function hasLeaveOnDate(officerId, date) {
               try {
                 const ids = resolveOfficerIds(officerId);
@@ -5202,7 +5209,7 @@ function hasFullAccessToTab(tab) {
             const rec = map[k] || null;
             const doneCls = rec ? ((rec.hasStart && rec.hasEnd) ? 'done' : 'undone') : '';
             const btnCls = ['roster-cal-day', baseCls, doneCls].filter(Boolean).join(' ');
-            return { btnCls };
+            return { btnCls, disabled };
           }
           try {
             if (officerId) {
@@ -5226,10 +5233,10 @@ function hasFullAccessToTab(tab) {
                   const isToday = isSameMonth && String(today.getDate()) === c;
                   const cellCls = ["roster-cal-cell", c ? "" : "empty", isToday ? "today" : ""].filter(Boolean).join(" ");
                   if (!c) return `<td class="${cellCls}"></td>`;
-                  const { btnCls } = getDayClasses(c);
+                  const { btnCls, disabled } = getDayClasses(c);
                   const k = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(c).padStart(2,'0')}`;
                   // 不顯示值班小標籤，僅以底色區分
-                  return `<td class="${cellCls}"><button type="button" class="${btnCls}" data-day="${c}">${c}</button></td>`;
+                  return disabled ? `<td class="${cellCls}"><span class="roster-cal-day-disabled">${c}</span></td>` : `<td class="${cellCls}"><button type="button" class="${btnCls}" data-day="${c}">${c}</button></td>`;
                 }).join("")}</tr>`).join("")}
               </tbody>
             </table>`;
@@ -6833,7 +6840,17 @@ function hasFullAccessToTab(tab) {
                             cell.kind,
                             isToday ? "today" : ""
                           ].filter(Boolean).join(" ");
-                          if (cell.kind !== "curr") {
+                          const offId = sel?.value || appState.currentUserId || (auth?.currentUser?.uid || "");
+                          let preAct = false;
+                          try {
+                            const acc = (appState.accounts||[]).find((a) => a.id === offId || a.uid === offId) || null;
+                            const created0 = acc?.createdAt || null;
+                            const act = created0 && typeof created0.toDate === 'function' ? created0.toDate() : (created0 instanceof Date ? created0 : (typeof created0 === 'string' ? new Date(created0) : null));
+                            const actMid = act ? new Date(act.getFullYear(), act.getMonth(), act.getDate()) : null;
+                            const cellDate = new Date(date.getFullYear(), date.getMonth(), Number(cell.day));
+                            preAct = !!(cell.kind === "curr" && actMid && cellDate < actMid);
+                          } catch {}
+                          if (cell.kind !== "curr" || preAct) {
                             return `<td class="${cellCls}"><span class="roster-cal-day-disabled">${cell.day}</span></td>`;
                           }
                           return `<td class="${cellCls}"><button type="button" class="roster-cal-day" data-day="${cell.day}">${cell.day}</button></td>`;
@@ -8326,7 +8343,19 @@ btnStart?.removeEventListener("click", () => setHomeStatus("work", "上班"));
               const displayBase = leaveType ? `請假日(${leaveType})` : base;
               const statusText = preAct ? '' : (issues.length ? `異常：${issues.join('、')}` : `正常：${displayBase}`);
               const isNormal = issues.length === 0;
-              rows.push({ date: new Date(dayStart), week: weekday(dayStart), startAt: preAct ? null : startAt, endAt: preAct ? null : endAt, totalHours: preAct ? 0 : totalHours, statusText, isNormal, planStart: preAct ? '' : planStart, planEnd: preAct ? '' : planEnd, planHours: preAct ? 0 : planHours, preAct });
+              rows.push({
+                date: new Date(dayStart),
+                week: weekday(dayStart),
+                startAt: preAct ? null : startAt,
+                endAt: preAct ? null : endAt,
+                totalHours: preAct ? 0 : totalHours,
+                statusText,
+                isNormal,
+                planStart: preAct ? '' : planStart,
+                planEnd: preAct ? '' : planEnd,
+                planHours: preAct ? 0 : planHours,
+                preAct
+              });
             }
             const frag = document.createDocumentFragment();
             rows.forEach((r) => {
